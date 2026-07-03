@@ -129,8 +129,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func pollUsage() {
         Task { @MainActor in
             do {
-                let dailyTokens = try await usageMonitor.fetchDailyUsage()
-                let monthlyTokens = try await usageMonitor.fetchMonthlyUsage()
+                let usage = try await usageMonitor.fetchUsage()
+                let dailyTokens = usage.daily
+                let monthlyTokens = usage.monthly
                 
                 // Format tokens (e.g. 1.5M, 12k, 2B)
                 var title = ""
