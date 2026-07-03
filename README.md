@@ -45,4 +45,14 @@ Manual path — download the plist from the Firebase console
 `Sources/VibeCount/`. The expected keys are documented in
 [`Sources/VibeCount/GoogleService-Info.plist.example`](Sources/VibeCount/GoogleService-Info.plist.example).
 
-Then rebuild (`swift run`) and the flame icon's popover will show live friends.
+### Running with live sync
+
+`swift run` produces a bare executable with **no** app bundle, and Firebase does
+**not** sync in that context (you'd see only your own row, no error). Build a real
+`.app` bundle instead:
+```bash
+scripts/build-app.sh          # → build/VibeCount.app (embeds the plist)
+open build/VibeCount.app
+```
+The flame icon's popover then shows live friends with updating token counts. Use
+`swift run` for local logic/dev; use the bundle for anything touching Firebase.
