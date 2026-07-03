@@ -37,7 +37,7 @@ public struct DashboardView: View {
             
             List(friends) { friend in
                 HStack {
-                    let isMe = (friend.friendId == users.first?.userId) || (friend.friendId == "localUser")
+                    let isMe = friend.friendId == users.first?.userId
                     
                     Text(friend.displayName)
                         .fontWeight(isMe ? .bold : .regular)

@@ -26,7 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            container = try ModelContainer(for: User.self, Friend.self, TokenLog.self)
+            container = try ModelContainer(for: User.self, Friend.self)
             
             // Clean up mock data and legacy localUser from SwiftData
             let context = container!.mainContext

@@ -7,7 +7,7 @@ import SwiftData
 final class ModelTests: XCTestCase {
     func testModelCreation() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: User.self, Friend.self, TokenLog.self, configurations: config)
+        let container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         let context = container.mainContext
         
         let user = User(userId: "u1", displayName: "Test", inviteCode: "123")
