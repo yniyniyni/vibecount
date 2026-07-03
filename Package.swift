@@ -16,6 +16,7 @@ let package = Package(
             dependencies: [
                 .product(name: "FirebaseFirestore", package: "firebase-ios-sdk")
             ],
+            exclude: ["GoogleService-Info.plist.example"],
             resources: [
                 .process("GoogleService-Info.plist")
             ],
