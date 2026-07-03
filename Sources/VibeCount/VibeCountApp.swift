@@ -15,7 +15,7 @@ struct VibeCountApp: App {
 }
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: SyncService?
@@ -67,7 +67,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: dashboard.modelContainer(container!))
-        
+        popover.delegate = self
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "VibeCount")
@@ -101,6 +102,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollUsage()
     }
     
+    func popoverWillShow(_ notification: Notification) {
+        // Refresh right before the popover appears so it never shows data older
+        // than the 600s polling interval, regardless of how it was opened.
+        pollUsage()
+    }
+
     @objc func togglePopover(_ sender: AnyObject?) {
         if let button = statusItem?.button {
             if popover.isShown {
