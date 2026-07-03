@@ -1,14 +1,13 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct VibeCountApp: App {
     var body: some Scene {
         MenuBarExtra("VibeCount", systemImage: "flame.fill") {
-            Text("Dashboard")
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+            DashboardView()
+                .modelContainer(for: [User.self, Friend.self, TokenLog.self])
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
