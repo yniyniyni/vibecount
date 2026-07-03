@@ -24,7 +24,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
 
-        let keys: [URLResourceKey] = [.isRegularFileKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
         guard let enumerator = FileManager.default.enumerator(
             at: projectsURL,
             includingPropertiesForKeys: keys,
@@ -43,6 +43,16 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         // once instead of walking the whole tree twice.
         for case let url as URL in enumerator {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
+
+            // A file last written before the 30-day window can't hold any in-window
+            // rows (every row's timestamp is <= the file's last write), so skip it
+            // without reading. Keeps the hot path proportional to recent activity
+            // instead of total history.
+            if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               modified < startOf30Days {
+                continue
+            }
+
             guard let fileContent = try? String(contentsOf: url, encoding: .utf8) else { continue }
 
             // De-duplicate assistant rows per file by "<messageId>:<requestId>" so
