@@ -15,7 +15,7 @@ struct VibeCountApp: App {
 }
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: SyncService?
@@ -26,7 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            container = try ModelContainer(for: User.self, Friend.self, TokenLog.self)
+            container = try ModelContainer(for: User.self, Friend.self)
             
             // Clean up mock data and legacy localUser from SwiftData
             let context = container!.mainContext
@@ -67,7 +67,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: dashboard.modelContainer(container!))
-        
+        popover.delegate = self
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "VibeCount")
@@ -101,6 +102,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollUsage()
     }
     
+    func popoverWillShow(_ notification: Notification) {
+        // Refresh right before the popover appears so it never shows data older
+        // than the 600s polling interval, regardless of how it was opened.
+        pollUsage()
+    }
+
     @objc func togglePopover(_ sender: AnyObject?) {
         if let button = statusItem?.button {
             if popover.isShown {
@@ -129,25 +136,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func pollUsage() {
         Task { @MainActor in
             do {
-                let dailyTokens = try await usageMonitor.fetchDailyUsage()
-                let monthlyTokens = try await usageMonitor.fetchMonthlyUsage()
-                
-                // Format tokens (e.g. 1.5M, 12k, 2B)
-                var title = ""
-                if dailyTokens >= 1_000_000_000 {
-                    title = String(format: " %.1fB", Double(dailyTokens) / 1_000_000_000.0)
-                } else if dailyTokens >= 1_000_000 {
-                    title = String(format: " %.1fM", Double(dailyTokens) / 1_000_000.0)
-                } else if dailyTokens >= 1_000 {
-                    title = String(format: " %.1fk", Double(dailyTokens) / 1_000.0)
-                } else {
-                    title = " \(dailyTokens)"
-                }
-                title = title.replacingOccurrences(of: ".0", with: "")
-                
-                // Update menu bar text
+                let usage = try await usageMonitor.fetchUsage()
+                let dailyTokens = usage.daily
+                let monthlyTokens = usage.monthly
+
+                // Update menu bar text (leading space separates it from the flame icon)
                 if let button = statusItem?.button {
-                    button.title = title
+                    button.title = " " + dailyTokens.formattedTokenCount
                 }
                 
                 // Get local user

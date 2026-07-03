@@ -31,18 +31,3 @@ public final class Friend {
         self.lastUpdated = lastUpdated
     }
 }
-
-@Model
-public final class TokenLog {
-    @Attribute(.unique) public var id: UUID
-    public var timestamp: Date
-    public var tokensBurned: Int
-    public var model: String
-    
-    public init(id: UUID = UUID(), timestamp: Date, tokensBurned: Int, model: String) {
-        self.id = id
-        self.timestamp = timestamp
-        self.tokensBurned = tokensBurned
-        self.model = model
-    }
-}
