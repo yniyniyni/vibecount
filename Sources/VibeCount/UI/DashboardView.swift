@@ -13,10 +13,17 @@ public struct DashboardView: View {
                 Text("Today's Burn")
                     .font(.headline)
                 Spacer()
-                Image(systemName: "gear")
+                Menu {
+                    Button("Quit") {
+                        NSApplication.shared.terminate(nil)
+                    }
+                } label: {
+                    Image(systemName: "gear")
+                }
+                .menuIndicator(.hidden)
             }
             .padding()
-            .background(Color(NSColor.windowBackgroundColor))
+            .background(Color(nsColor: .windowBackgroundColor))
             
             List(friends) { friend in
                 HStack {
