@@ -50,16 +50,8 @@ public struct DashboardView: View {
             Divider()
             
             if let user = users.first {
-                HStack {
-                    Text("Your Invite Code:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(user.inviteCode)
-                        .font(.caption)
-                        .fontDesign(.monospaced)
-                        .fontWeight(.bold)
-                }
-                .padding(.top, 4)
+                InviteCodeButton(inviteCode: user.inviteCode)
+                    .padding(.top, 8)
             }
             
             VStack(spacing: 4) {
