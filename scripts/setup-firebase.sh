@@ -93,4 +93,8 @@ echo "   from:    $SRC"
 echo "   to:      ${DEST/#$ROOT\//}   (gitignored)"
 echo "   project: $project"
 echo
-echo "Rebuild to pick up live Firebase sync:  swift run VibeCount"
+echo "Now build the .app bundle to pick up live Firebase sync:"
+echo "  scripts/build-app.sh && open build/VibeCount.app"
+echo
+echo "(swift run does NOT sync: its plist lands in Bundle.module, but the app"
+echo " looks in Bundle.main — only the .app bundle puts it where it's found.)"
