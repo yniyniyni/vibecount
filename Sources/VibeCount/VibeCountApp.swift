@@ -132,23 +132,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let usage = try await usageMonitor.fetchUsage()
                 let dailyTokens = usage.daily
                 let monthlyTokens = usage.monthly
-                
-                // Format tokens (e.g. 1.5M, 12k, 2B)
-                var title = ""
-                if dailyTokens >= 1_000_000_000 {
-                    title = String(format: " %.1fB", Double(dailyTokens) / 1_000_000_000.0)
-                } else if dailyTokens >= 1_000_000 {
-                    title = String(format: " %.1fM", Double(dailyTokens) / 1_000_000.0)
-                } else if dailyTokens >= 1_000 {
-                    title = String(format: " %.1fk", Double(dailyTokens) / 1_000.0)
-                } else {
-                    title = " \(dailyTokens)"
-                }
-                title = title.replacingOccurrences(of: ".0", with: "")
-                
-                // Update menu bar text
+
+                // Update menu bar text (leading space separates it from the flame icon)
                 if let button = statusItem?.button {
-                    button.title = title
+                    button.title = " " + dailyTokens.formattedTokenCount
                 }
                 
                 // Get local user

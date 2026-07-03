@@ -9,21 +9,7 @@ public struct DashboardView: View {
     @Query var users: [User]
     
     public init() {}
-    
-    private func formatTokens(_ tokens: Int) -> String {
-        var title = ""
-        if tokens >= 1_000_000_000 {
-            title = String(format: "%.1fB", Double(tokens) / 1_000_000_000.0)
-        } else if tokens >= 1_000_000 {
-            title = String(format: "%.1fM", Double(tokens) / 1_000_000.0)
-        } else if tokens >= 1_000 {
-            title = String(format: "%.1fk", Double(tokens) / 1_000.0)
-        } else {
-            title = "\(tokens)"
-        }
-        return title.replacingOccurrences(of: ".0", with: "")
-    }
-    
+
     public var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $selectedTab) {
@@ -53,7 +39,7 @@ public struct DashboardView: View {
                     // Use actual monthly tokens when selected
                     let displayTokens = selectedTab == 0 ? friend.latestDailyTokens : friend.latestMonthlyTokens
                     
-                    Text(formatTokens(displayTokens))
+                    Text(displayTokens.formattedTokenCount)
                         .fontWeight(.bold)
                         .fontDesign(.monospaced)
                 }
