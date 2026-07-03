@@ -3,6 +3,7 @@ import Foundation
 
 public protocol UsageMonitor: Sendable {
     func fetchDailyUsage() async throws -> Int
+    func fetchMonthlyUsage() async throws -> Int
 }
 
 public final class MockUsageMonitor: UsageMonitor {
@@ -12,5 +13,10 @@ public final class MockUsageMonitor: UsageMonitor {
         // Simulates network/CLI delay
         try await Task.sleep(nanoseconds: 500_000_000)
         return 15000
+    }
+    
+    public func fetchMonthlyUsage() async throws -> Int {
+        try await Task.sleep(nanoseconds: 500_000_000)
+        return 250000
     }
 }

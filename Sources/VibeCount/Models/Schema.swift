@@ -20,12 +20,14 @@ public final class Friend {
     @Attribute(.unique) public var friendId: String
     public var displayName: String
     public var latestDailyTokens: Int
+    public var latestMonthlyTokens: Int = 0
     public var lastUpdated: Date
     
-    public init(friendId: String, displayName: String, latestDailyTokens: Int, lastUpdated: Date) {
+    public init(friendId: String, displayName: String, latestDailyTokens: Int, latestMonthlyTokens: Int = 0, lastUpdated: Date) {
         self.friendId = friendId
         self.displayName = displayName
         self.latestDailyTokens = latestDailyTokens
+        self.latestMonthlyTokens = latestMonthlyTokens
         self.lastUpdated = lastUpdated
     }
 }

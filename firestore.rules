@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      // For this native mac app leaderboard, we allow any authenticated or unauthenticated
+      // user to read the leaderboard (so friends can see each other) and write their own
+      // usage data.
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
