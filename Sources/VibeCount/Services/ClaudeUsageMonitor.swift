@@ -1,7 +1,17 @@
 import Foundation
 
 public struct ClaudeUsageMonitor: UsageMonitor {
-    public init() {}
+    private let projectsURL: URL
+
+    public init() {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        self.init(projectsURL: homeDir.appendingPathComponent(".claude/projects"))
+    }
+
+    /// Test seam: scan a fixture directory instead of ~/.claude/projects.
+    init(projectsURL: URL) {
+        self.projectsURL = projectsURL
+    }
 
     public func fetchUsage() async throws -> DailyMonthlyUsage {
         let calendar = Calendar.current
@@ -9,9 +19,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
-
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let projectsURL = homeDir.appendingPathComponent(".claude/projects")
 
         guard FileManager.default.fileExists(atPath: projectsURL.path) else {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
