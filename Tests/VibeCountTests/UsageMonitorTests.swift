@@ -5,7 +5,8 @@ import XCTest
 final class UsageMonitorTests: XCTestCase {
     func testMockMonitor() async throws {
         let monitor: UsageMonitor = MockUsageMonitor()
-        let tokens = try await monitor.fetchDailyUsage()
-        XCTAssertGreaterThan(tokens, 0)
+        let usage = try await monitor.fetchUsage()
+        XCTAssertGreaterThan(usage.daily, 0)
+        XCTAssertGreaterThan(usage.monthly, 0)
     }
 }
