@@ -23,6 +23,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var updateTimer: Timer?
     var popover: NSPopover!
     var eventMonitor: Any?
+    /// Guards against overlapping polls. Each poll does a full disk scan plus a
+    /// Firestore write, so rapid triggers (repeated popover opens, timer + manual
+    /// refresh) must not stack up and race the button title / network writes.
+    var isPolling = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -42,22 +46,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } catch {
             print("Failed to create ModelContainer: \(error)")
         }
-        
+
+        // A nil container means the on-disk store failed to open or migrate.
+        // Nothing downstream can run without it (the popover binds it directly),
+        // so fail loudly here instead of force-unwrapping into a crash later.
+        guard let container = container else {
+            let alert = NSAlert()
+            alert.messageText = "VibeCount can't start"
+            alert.informativeText = "Failed to open the local data store. Please restart the app, and reinstall if the problem persists."
+            alert.runModal()
+            NSApp.terminate(nil)
+            return
+        }
+
         // Try configuring Firebase
         if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
            FileManager.default.fileExists(atPath: path) {
             FirebaseApp.configure()
-            if let container = container {
-                syncService = FirebaseSyncService(container: container)
-                syncService?.startSyncing()
-            }
+            syncService = FirebaseSyncService(container: container)
+            syncService?.startSyncing()
         } else {
             print("No GoogleService-Info.plist found. Falling back to MockSyncService.")
-            if let container = container {
-                Task { @MainActor in
-                    syncService = MockSyncService(context: container.mainContext)
-                    syncService?.startSyncing()
-                }
+            Task { @MainActor in
+                syncService = MockSyncService(context: container.mainContext)
+                syncService?.startSyncing()
             }
         }
         
@@ -66,7 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: dashboard.modelContainer(container!))
+        popover.contentViewController = NSHostingController(rootView: dashboard.modelContainer(container))
         popover.delegate = self
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -134,7 +146,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     
     func pollUsage() {
+        // Skip if a poll is already in flight so overlapping triggers can't stack
+        // concurrent disk scans / Firestore writes or race the button title.
+        guard !isPolling else { return }
+        isPolling = true
         Task { @MainActor in
+            defer { isPolling = false }
             do {
                 let usage = try await usageMonitor.fetchUsage()
                 let dailyTokens = usage.daily
