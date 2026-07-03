@@ -1,19 +1,8 @@
 import Foundation
 
 public struct ClaudeUsageMonitor: UsageMonitor {
-    private let historyURL: URL
-    private let dateFormatter: DateFormatter
-    
-    public init() {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        self.historyURL = homeDir.appendingPathComponent(".claude").appendingPathComponent("history.jsonl")
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone.current
-        self.dateFormatter = formatter
-    }
-    
+    public init() {}
+
     private func fetchUsage(for isMatchingDate: (Date) -> Bool) async throws -> Int {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let projectsURL = homeDir.appendingPathComponent(".claude/projects")
