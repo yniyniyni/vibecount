@@ -34,17 +34,8 @@ public final class MockSyncService: SyncService {
     
     public func pushLocalUsage(userId: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) async throws {
         print("MockSyncService: Pushed \(dailyTokens) daily, \(monthlyTokens) monthly tokens for \(displayName)")
-        
-        let descriptor = FetchDescriptor<Friend>(predicate: #Predicate { $0.friendId == userId })
-        if let existing = try? context.fetch(descriptor).first {
-            existing.displayName = displayName
-            existing.latestDailyTokens = dailyTokens
-            existing.latestMonthlyTokens = monthlyTokens
-            existing.lastUpdated = Date()
-        } else {
-            let me = Friend(friendId: userId, displayName: displayName, latestDailyTokens: dailyTokens, latestMonthlyTokens: monthlyTokens, lastUpdated: Date())
-            context.insert(me)
-        }
+
+        Friend.upsert(friendId: userId, displayName: displayName, dailyTokens: dailyTokens, monthlyTokens: monthlyTokens, in: context)
         try? context.save()
     }
 }
@@ -77,18 +68,8 @@ public final class FirebaseSyncService: SyncService {
                     let displayName = data["displayName"] as? String ?? "Unknown"
                     let dTokens = data["latestDailyTokens"] as? Int ?? 0
                     let mTokens = data["latestMonthlyTokens"] as? Int ?? 0
-                    
-                    // Update or insert into SwiftData
-                    let descriptor = FetchDescriptor<Friend>(predicate: #Predicate { $0.friendId == id })
-                    if let existing = try? context.fetch(descriptor).first {
-                        existing.displayName = displayName
-                        existing.latestDailyTokens = dTokens
-                        existing.latestMonthlyTokens = mTokens
-                        existing.lastUpdated = Date()
-                    } else {
-                        let newFriend = Friend(friendId: id, displayName: displayName, latestDailyTokens: dTokens, latestMonthlyTokens: mTokens, lastUpdated: Date())
-                        context.insert(newFriend)
-                    }
+
+                    Friend.upsert(friendId: id, displayName: displayName, dailyTokens: dTokens, monthlyTokens: mTokens, in: context)
                 }
                 try? context.save()
             }
@@ -103,18 +84,9 @@ public final class FirebaseSyncService: SyncService {
     public func pushLocalUsage(userId: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) async throws {
         // Save to local SwiftData context so user appears in UI instantly
         let context = container.mainContext
-        let descriptor = FetchDescriptor<Friend>(predicate: #Predicate { $0.friendId == userId })
-        if let existing = try? context.fetch(descriptor).first {
-            existing.displayName = displayName
-            existing.latestDailyTokens = dailyTokens
-            existing.latestMonthlyTokens = monthlyTokens
-            existing.lastUpdated = Date()
-        } else {
-            let me = Friend(friendId: userId, displayName: displayName, latestDailyTokens: dailyTokens, latestMonthlyTokens: monthlyTokens, lastUpdated: Date())
-            context.insert(me)
-        }
+        Friend.upsert(friendId: userId, displayName: displayName, dailyTokens: dailyTokens, monthlyTokens: monthlyTokens, in: context)
         try? context.save()
-        
+
         // Push to Firebase
         let data: [String: Any] = [
             "displayName": displayName,
