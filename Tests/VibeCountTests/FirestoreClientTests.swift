@@ -128,4 +128,21 @@ final class FirestoreClientTests: XCTestCase {
             XCTFail("unexpected error type: \(error)")
         }
     }
+
+    func testTransientRefreshFailureDoesNotWipeStoredIdentity() async throws {
+        try store.save(StoredAuthSession(uid: "uid-1", refreshToken: "refresh-1"))
+        StubURLProtocol.handler = { request in
+            XCTAssertTrue(request.url!.host!.contains("securetoken"),
+                          "a transient refresh failure must not trigger a fresh signUp")
+            return (503, Self.json(["error": ["message": "backend unavailable"]]))
+        }
+        do {
+            _ = try await client.signIn()
+            XCTFail("expected http error")
+        } catch let error as FirestoreClientError {
+            XCTAssertEqual(error, .http(503, "backend unavailable"))
+        }
+        XCTAssertEqual(store.load(), StoredAuthSession(uid: "uid-1", refreshToken: "refresh-1"),
+                       "identity must survive a transient server failure")
+    }
 }
