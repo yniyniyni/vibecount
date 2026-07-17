@@ -12,7 +12,9 @@ let package = Package(
         // app reads it from Bundle.main, which only exists in the .app bundle
         // that scripts/build-app.sh assembles. The (gitignored) plist lives at
         // the repository root so a fresh clone builds without warnings.
-        .executableTarget(name: "VibeCount"),
+        .executableTarget(
+            name: "VibeCount",
+            resources: [.copy("Resources/firestore.rules")]),
         .testTarget(name: "VibeCountTests", dependencies: ["VibeCount"])
     ]
 )

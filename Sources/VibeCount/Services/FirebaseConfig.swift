@@ -17,10 +17,13 @@ struct FirebaseConfig: Equatable, Sendable {
     }
 }
 
-/// Persisted anonymous identity — enough to resume the same uid forever.
+/// Persisted identity — enough to resume the same uid forever.
 struct StoredAuthSession: Codable, Equatable, Sendable {
     var uid: String
     var refreshToken: String
+    /// Google account linked onto this uid, nil while anonymous-only.
+    /// Display/status only — the refresh token is the credential.
+    var linkedEmail: String? = nil
 }
 
 /// Owns the 0600 JSON file holding the refresh token. Deliberately NOT the
@@ -31,11 +34,30 @@ struct StoredAuthSession: Codable, Equatable, Sendable {
 struct AuthSessionStore: Sendable {
     let fileURL: URL
 
-    init(directory: URL? = nil) {
+    /// With a `projectID`, the session file is per-project
+    /// (firebase-auth-<projectID>.json): leaving a project keeps its identity
+    /// on disk, so rejoining the same project later resumes the same uid
+    /// instead of minting a duplicate anonymous user. nil keeps the legacy
+    /// single-file name (pre-existing installs, tests).
+    init(directory: URL? = nil, projectID: String? = nil) {
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VibeCount", isDirectory: true)
-        fileURL = base.appendingPathComponent("firebase-auth.json")
+        let name = projectID.map { pid in
+            "firebase-auth-\(pid.filter { $0.isLetter || $0.isNumber || $0 == "-" }).json"
+        } ?? "firebase-auth.json"
+        fileURL = base.appendingPathComponent(name)
+    }
+
+    /// One-time move of the legacy single-session file to the per-project
+    /// name, so an existing install keeps its identity when this build first
+    /// runs. No-op when a per-project session already exists.
+    static func adoptLegacySession(for projectID: String, directory: URL? = nil) {
+        let legacy = AuthSessionStore(directory: directory)
+        let current = AuthSessionStore(directory: directory, projectID: projectID)
+        guard current.load() == nil, let session = legacy.load() else { return }
+        try? current.save(session)
+        legacy.clear()
     }
 
     func load() -> StoredAuthSession? {
@@ -73,5 +95,19 @@ struct AuthSessionStore: Sendable {
 
     func clear() {
         try? FileManager.default.removeItem(at: fileURL)
+    }
+}
+
+extension FirebaseConfig {
+    init(_ syncConfig: SyncConfig) {
+        self.init(apiKey: syncConfig.apiKey, projectID: syncConfig.projectID)
+    }
+
+    /// Precedence: user-entered stored config → bundled plist → nil
+    /// (local-only). `bundled` is injected (callers pass `FirebaseConfig.load()`)
+    /// so the order is unit-testable without fabricating bundles.
+    static func resolve(store: SyncConfigStore, bundled: FirebaseConfig?) -> FirebaseConfig? {
+        if let stored = store.load() { return FirebaseConfig(stored) }
+        return bundled
     }
 }

@@ -15,35 +15,38 @@ Vibe-Count is a lightweight, competitive dashboard for friends to track their da
 
 To build and run tests:
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test
+swift test
 ```
 
 To run the application directly from the CLI:
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift run
+swift run
 ```
 
 ## Firebase (cross-device leaderboard sync)
 
-The app is local-first and runs fine without any setup — but without Firebase it
-falls back to `MockSyncService` and you only see your own row. To sync a real
-leaderboard with friends, each person needs a `GoogleService-Info.plist` in
-`Sources/VibeCount/` (it is **gitignored**, so a fresh clone must supply its own).
+The app is local-first and runs fine without any setup — without a backend it
+tracks only your own usage. To sync a leaderboard with friends you can either
+use the **shared VibeCount cloud** or **self-host** a Firebase project:
 
-Easiest path — run the helper, which finds a plist (an installed
-`/Applications/VibeCount.app`, `~/Downloads/`, or a path you pass) and copies it
-into place:
-```bash
-scripts/setup-firebase.sh                 # auto-detect
-scripts/setup-firebase.sh /path/to/GoogleService-Info.plist
-scripts/setup-firebase.sh --force         # overwrite an existing one
-```
+- **VibeCount cloud (no Firebase setup):** first launch (or *Sync Settings…*) →
+  **Use VibeCount cloud**. Joins the shared project (`vibe-count-app-0703`)
+  and **requires Sign in with Google** so your identity survives reinstalls.
+  Friends use invite codes / join links as usual on that shared backend.
+- **Host (self-host):** pick *Host your own group* and follow the guided
+  steps — the app opens the right Firebase console pages, gives you the
+  security rules to paste, validates the setup, and hands you a join link.
+- **Join (self-host):** click the `vibecount://join?…` link your host sent
+  (or paste it into *Join a self-hosted group*). The host is added as a
+  friend automatically.
+- **Optional Google sign-in:** if the host completes wizard step 6 (their own
+  Desktop OAuth client), members can click *Sign in with Google* in Sync
+  Settings to link their identity — reinstalling or moving to a new Mac then
+  recovers the same stats, friends, and invite code by signing in again.
 
-Manual path — download the plist from the Firebase console
-(project `vibe-count-app-0703` → Project settings → Your apps → the Apple app
-`com.vibecount.app` → `GoogleService-Info.plist`) and drop it into
-`Sources/VibeCount/`. The expected keys are documented in
-[`Sources/VibeCount/GoogleService-Info.plist.example`](Sources/VibeCount/GoogleService-Info.plist.example).
+A `GoogleService-Info.plist` bundled by `scripts/build-app.sh` still works as
+a fallback backend (`scripts/setup-firebase.sh` installs one), but a stored
+GUI config (including VibeCount cloud) takes precedence when both exist.
 
 ### Running with live sync
 

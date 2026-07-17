@@ -21,6 +21,16 @@ enum FirestoreClientError: Error, LocalizedError, Equatable {
     }
 }
 
+/// Result of attaching a Google account to the current identity.
+enum GoogleLinkOutcome: Equatable, Sendable {
+    /// The Google account was linked onto the current uid — identity upgraded.
+    case linked(email: String?)
+    /// The account was already linked to an earlier uid (previous install);
+    /// that identity was signed in and persisted instead. The caller must
+    /// restart sync so the app adopts the recovered uid.
+    case recovered(uid: String, email: String?)
+}
+
 /// Minimal Identity Toolkit + Firestore REST client. Anonymous auth with a
 /// file-persisted refresh token; document operations added in Task 4.
 actor FirestoreClient {
@@ -109,7 +119,10 @@ actor FirestoreClient {
               let userID = json["user_id"] as? String else {
             throw FirestoreClientError.authFailed("malformed refresh response")
         }
-        try store.save(StoredAuthSession(uid: userID, refreshToken: newRefreshToken))
+        // Preserve link status across routine refreshes — this rewrite happens
+        // hourly and must not silently drop the linked-account marker.
+        try store.save(StoredAuthSession(
+            uid: userID, refreshToken: newRefreshToken, linkedEmail: stored.linkedEmail))
         adopt(token: token, uid: userID, expiresIn: json["expires_in"] as? String)
         return token
     }
@@ -135,6 +148,59 @@ actor FirestoreClient {
             throw FirestoreClientError.http(status, message)
         }
         return json
+    }
+
+    // MARK: - Google account linking
+
+    /// Links a Google credential onto the current (anonymous) uid; when the
+    /// account already belongs to an earlier uid, signs into THAT identity
+    /// instead (reinstall recovery). Both paths persist the fresh session.
+    func linkGoogleAccount(googleIDToken: String) async throws -> GoogleLinkOutcome {
+        let currentToken = try await validToken()
+        let currentUid = uid
+        do {
+            let json = try await signInWithIdp(googleIDToken: googleIDToken, linkTo: currentToken)
+            let adopted = try adoptIdpSession(json)
+            return .linked(email: adopted.linkedEmail)
+        } catch FirestoreClientError.authFailed(let message)
+            where message.contains("FEDERATED_USER_ID_ALREADY_LINKED") {
+            let json = try await signInWithIdp(googleIDToken: googleIDToken, linkTo: nil)
+            let adopted = try adoptIdpSession(json)
+            // Same uid coming back would mean the server contradicted itself;
+            // treat it as linked to keep the caller's restart logic honest.
+            if adopted.uid == currentUid {
+                return .linked(email: adopted.linkedEmail)
+            }
+            return .recovered(uid: adopted.uid, email: adopted.linkedEmail)
+        }
+    }
+
+    private func signInWithIdp(googleIDToken: String, linkTo: String?) async throws -> [String: Any] {
+        var body: [String: Any] = [
+            "postBody": "id_token=\(googleIDToken)&providerId=google.com",
+            "requestUri": "http://localhost",
+            "returnSecureToken": true,
+        ]
+        if let linkTo { body["idToken"] = linkTo }
+        var request = URLRequest(url: URL(
+            string: "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=\(config.apiKey)")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await authRequest(request)
+    }
+
+    private func adoptIdpSession(_ json: [String: Any]) throws -> StoredAuthSession {
+        guard let token = json["idToken"] as? String,
+              let refreshToken = json["refreshToken"] as? String,
+              let localId = json["localId"] as? String else {
+            throw FirestoreClientError.authFailed("malformed signInWithIdp response")
+        }
+        let session = StoredAuthSession(
+            uid: localId, refreshToken: refreshToken, linkedEmail: json["email"] as? String)
+        try store.save(session)
+        adopt(token: token, uid: localId, expiresIn: json["expiresIn"] as? String)
+        return session
     }
 
     // MARK: - Documents

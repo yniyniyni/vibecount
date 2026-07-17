@@ -15,10 +15,15 @@ struct VibeCountApp: App {
 }
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: (any SyncService)?
+    /// The client behind the current FirestoreSyncService, kept so account
+    /// linking can reach the same session/token state the sync stack uses.
+    var firestoreClient: FirestoreClient?
+    let syncConfigStore = SyncConfigStore()
+    var setupWindow: NSWindow?
     var usageMonitor: UsageMonitor = ClaudeUsageMonitor()
     var updateTimer: Timer?
     var popover: NSPopover!
@@ -49,27 +54,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
-        // Sync config rides in GoogleService-Info.plist, which only the .app
-        // bundle built by scripts/build-app.sh provides. Without it, run
-        // local-only — real data for the local user, never fabricated friends.
-        let service: any SyncService
-        if let config = FirebaseConfig.load() {
-            service = FirestoreSyncService(
-                container: container, backend: FirestoreClient(config: config))
-        } else {
-            logger.notice("No GoogleService-Info.plist in Bundle.main — running local-only.")
-            service = LocalOnlySyncService(context: container.mainContext)
-        }
-        syncService = service
+        // Sync config: user-entered (Application Support) beats a bundled
+        // GoogleService-Info.plist; with neither, run local-only.
+        syncService = makeSyncService(container: container)
 
-        // Setup Popover
-        let dashboard = DashboardView()
-            .modelContainer(container)
-            .environment(service.status)
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: dashboard)
+        rebuildPopoverContent()
         popover.delegate = self
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -106,10 +98,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             await self?.syncService?.startSyncing()
             self?.pollUsage()
         }
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(openSyncSettings),
+            name: NSNotification.Name("OpenSyncSettings"), object: nil)
+
+        // First run with no backend at all: offer setup once. Skipping is
+        // remembered; the popover's "Sync Settings…" reopens it anytime.
+        if FirebaseConfig.resolve(store: syncConfigStore, bundled: FirebaseConfig.load()) == nil,
+           !UserDefaults.standard.bool(forKey: "didOfferSetup") {
+            UserDefaults.standard.set(true, forKey: "didOfferSetup")
+            showSetupWindow(route: .welcome)
+        }
     }
 
     @objc func manualRefresh() {
         pollUsage()
+    }
+
+    /// Titlebar close bypasses the SwiftUI dismiss action; release the
+    /// window and its model here so they don't linger until the next open.
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === setupWindow else { return }
+        setupWindow = nil
+        pendingSetupModel = nil
     }
 
     func popoverWillShow(_ notification: Notification) {
@@ -211,5 +223,166 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         alert.informativeText = error.localizedDescription
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    // MARK: - Sync backend management
+
+    private func makeSyncService(container: ModelContainer) -> any SyncService {
+        if let config = FirebaseConfig.resolve(store: syncConfigStore, bundled: FirebaseConfig.load()) {
+            // Pre-per-project builds kept one global session file; move it to
+            // this project's name once so the existing identity carries over.
+            AuthSessionStore.adoptLegacySession(for: config.projectID)
+            let client = FirestoreClient(
+                config: config,
+                store: AuthSessionStore(projectID: config.projectID))
+            firestoreClient = client
+            return FirestoreSyncService(container: container, backend: client)
+        }
+        logger.notice("No sync config (stored or bundled) — running local-only.")
+        return LocalOnlySyncService(context: container.mainContext)
+    }
+
+    /// The popover binds a specific service's status at construction, so a
+    /// backend swap rebuilds its content view.
+    private func rebuildPopoverContent() {
+        guard let container, let syncService else { return }
+        let dashboard = DashboardView()
+            .modelContainer(container)
+            .environment(syncService.status)
+        popover.contentViewController = NSHostingController(rootView: dashboard)
+    }
+
+    /// Adopts a validated identity + config and live-swaps the sync service.
+    /// Called by SetupModel only after ConfigValidator succeeded.
+    func commitSyncConfig(_ config: SyncConfig, session: StoredAuthSession) async throws {
+        guard let container else { throw SyncError.notConfigured }
+        // Per-project session file: the old project's session stays on disk,
+        // so switching back later resumes that identity instead of minting a
+        // duplicate user.
+        let authStore = AuthSessionStore(projectID: config.projectID)
+        // Save-then-purge: a failed save leaves the old identity + config
+        // fully intact. A failed purge (after both saves succeed) leaves only
+        // stale local friend rows, which refreshLeaderboard's removeAll-except
+        // reconciliation cleans up once the new backend starts syncing.
+        try authStore.save(session)
+        try syncConfigStore.save(config)
+        try BackendSwitcher.prepareForNewBackend(context: container.mainContext)
+
+        syncService?.stopSyncing()
+        let client = FirestoreClient(config: FirebaseConfig(config), store: authStore)
+        firestoreClient = client
+        let service = FirestoreSyncService(container: container, backend: client)
+        syncService = service
+        rebuildPopoverContent()
+        await service.startSyncing()
+        // Auto-friend the host so a joiner's leaderboard is never empty.
+        // Best-effort: a failure here still leaves a working backend.
+        if let hostCode = config.hostInviteCode {
+            try? await service.addFriend(inviteCode: hostCode)
+        }
+        pollUsage()
+    }
+
+    // MARK: - Setup window
+
+    @objc func openSyncSettings() {
+        showSetupWindow(route: syncConfigStore.load() == nil ? .welcome : .settings)
+    }
+
+    func showSetupWindow(route: SetupModel.Route) {
+        setupWindow?.close()
+        let ownInviteCode = try? container?.mainContext
+            .fetch(FetchDescriptor<User>()).first?.inviteCode
+        let storedConfig = syncConfigStore.load()
+        let linkedEmail = storedConfig.flatMap {
+            AuthSessionStore(projectID: $0.projectID).load()?.linkedEmail
+        }
+        let model = SetupModel(
+            route: route,
+            currentConfig: storedConfig,
+            ownInviteCode: ownInviteCode,
+            linkedEmail: linkedEmail,
+            actions: SetupActions(
+                validate: { config, store in
+                    // Seed the scratch store with any session previously used
+                    // with this project: validation then refreshes that
+                    // identity (same uid) instead of signing up a duplicate.
+                    // A dead token still falls back to a fresh sign-up inside
+                    // FirestoreClient.
+                    if let previous = AuthSessionStore(projectID: config.projectID).load() {
+                        try? store.save(previous)
+                    }
+                    return await ConfigValidator().validate(config, authStore: store)
+                },
+                commit: { [weak self] config, session in
+                    try await self?.commitSyncConfig(config, session: session)
+                },
+                fetchOwnInviteCode: { [weak self] in
+                    try? self?.container?.mainContext.fetch(FetchDescriptor<User>()).first?.inviteCode
+                },
+                signInWithGoogle: { [weak self] in
+                    guard let self,
+                          let stored = self.syncConfigStore.load() else {
+                        throw GoogleSignInError.notAvailable
+                    }
+                    // Cloud configs always get the shared OAuth pair, even if
+                    // an older install only saved projectID + apiKey.
+                    let config = DefaultSyncProject.enriched(stored)
+                    guard let clientID = config.googleClientID,
+                          let clientSecret = config.googleClientSecret,
+                          let client = self.firestoreClient else {
+                        throw GoogleSignInError.notAvailable
+                    }
+                    // Persist enriched OAuth fields so the next launch is ready.
+                    if config.googleClientID != stored.googleClientID
+                        || config.googleClientSecret != stored.googleClientSecret {
+                        try? self.syncConfigStore.save(config)
+                    }
+                    let googleToken = try await GoogleSignInFlow()
+                        .signIn(clientID: clientID, clientSecret: clientSecret)
+                    let outcome = try await client.linkGoogleAccount(googleIDToken: googleToken)
+                    switch outcome {
+                    case .linked(let email):
+                        return email
+                    case .recovered(_, let email):
+                        // A previous install's identity came back: restart
+                        // sync so adoptIdentity migrates the local row and
+                        // the recovered friends list re-syncs.
+                        self.syncService?.stopSyncing()
+                        await self.syncService?.startSyncing()
+                        self.pollUsage()
+                        return email
+                    }
+                },
+                dismiss: { [weak self] in
+                    self?.setupWindow?.close()
+                    self?.setupWindow = nil
+                }))
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SetupView(model: model)))
+        window.title = "VibeCount Sync"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        setupWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        pendingSetupModel = model
+    }
+
+    /// Kept so the deep-link handler can prefill an already-open window.
+    var pendingSetupModel: SetupModel?
+
+    // MARK: - Deep links
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first else { return }
+        switch JoinLink.parse(url: url) {
+        case .failure(let error):
+            presentError(title: "Couldn't Open Join Link", error: error)
+        case .success(let link):
+            showSetupWindow(route: .join)
+            pendingSetupModel?.prefill(joinLink: link)
+        }
     }
 }
