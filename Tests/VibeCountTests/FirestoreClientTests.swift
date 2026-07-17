@@ -292,4 +292,14 @@ final class FirestoreClientTests: XCTestCase {
         XCTAssertNotNil(doc)
         XCTAssertEqual(firestoreCalls, 2)
     }
+
+    func testDocumentPathsArePercentEncodedInURLs() async throws {
+        stubAuthAndFirestore { request in
+            XCTAssertEqual(
+                request.url!.absoluteString,
+                "\(Self.docsBase)/users/uid-1/friends/John%20Smith%20%23legacy")
+            return (200, Self.json([:]))
+        }
+        try await client.deleteDocument(path: "users/uid-1/friends/John Smith #legacy")
+    }
 }

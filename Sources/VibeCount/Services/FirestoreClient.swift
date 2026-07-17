@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 enum FirestoreClientError: Error, LocalizedError, Equatable {
     /// Identity Toolkit rejected sign-up/refresh; carries the server message
@@ -148,9 +147,22 @@ actor FirestoreClient {
         "projects/\(config.projectID)/databases/(default)/documents/\(path)"
     }
 
+    /// Percent-encodes each segment of a relative document path, preserving
+    /// the "/" separators. Legacy local data can contain arbitrary strings
+    /// (old builds persisted user-typed friend ids), and a raw interpolation
+    /// would crash the force-unwrapped URL(string:) below.
+    private func encodedPath(_ path: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: allowed) ?? String($0) }
+            .joined(separator: "/")
+    }
+
     /// nil on 404 — "no such document" is an expected answer, not an error.
     func getDocument(path: String) async throws -> FirestoreDocument? {
-        let (status, data) = try await send("GET", url: URL(string: "\(documentsBase)/\(path)")!)
+        let (status, data) = try await send(
+            "GET", url: URL(string: "\(documentsBase)/\(encodedPath(path))")!)
         if status == 404 { return nil }
         try Self.checkStatus(status, data: data)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
@@ -161,7 +173,7 @@ actor FirestoreClient {
     /// when present (we always send the complete field set).
     func patchDocument(path: String, fields: [String: FirestoreValue]) async throws {
         let (status, data) = try await send(
-            "PATCH", url: URL(string: "\(documentsBase)/\(path)")!,
+            "PATCH", url: URL(string: "\(documentsBase)/\(encodedPath(path))")!,
             body: FirestoreDocument.encodeFields(fields))
         try Self.checkStatus(status, data: data)
     }
@@ -170,7 +182,7 @@ actor FirestoreClient {
     /// which is how the rules' create-only collections signal a lost race.
     func createDocument(parent: String, documentID: String,
                         fields: [String: FirestoreValue]) async throws {
-        var components = URLComponents(string: "\(documentsBase)/\(parent)")!
+        var components = URLComponents(string: "\(documentsBase)/\(encodedPath(parent))")!
         components.queryItems = [URLQueryItem(name: "documentId", value: documentID)]
         let (status, data) = try await send(
             "POST", url: components.url!, body: FirestoreDocument.encodeFields(fields))
@@ -178,13 +190,14 @@ actor FirestoreClient {
     }
 
     func deleteDocument(path: String) async throws {
-        let (status, data) = try await send("DELETE", url: URL(string: "\(documentsBase)/\(path)")!)
+        let (status, data) = try await send(
+            "DELETE", url: URL(string: "\(documentsBase)/\(encodedPath(path))")!)
         try Self.checkStatus(status, data: data)
     }
 
     /// One page is plenty at friends scale; deliberately no pagination.
     func listDocuments(path: String) async throws -> [FirestoreDocument] {
-        var components = URLComponents(string: "\(documentsBase)/\(path)")!
+        var components = URLComponents(string: "\(documentsBase)/\(encodedPath(path))")!
         components.queryItems = [URLQueryItem(name: "pageSize", value: "300")]
         let (status, data) = try await send("GET", url: components.url!)
         try Self.checkStatus(status, data: data)
