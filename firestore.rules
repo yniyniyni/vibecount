@@ -1,12 +1,88 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // The requester previously added `uid` by presenting that user's invite
+    // code, which created /users/{requester}/friends/{uid}. That explicit
+    // relationship is what grants read access to the friend's usage document.
+    function isFriendOf(uid) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/friends/$(uid));
+    }
+
+    function isValidUserDoc() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['displayName', 'latestDailyTokens', 'latestMonthlyTokens', 'lastUpdated'])
+        && d.keys().hasAll(['displayName', 'latestDailyTokens', 'latestMonthlyTokens', 'lastUpdated'])
+        && d.displayName is string
+        && d.displayName.size() >= 1
+        && d.displayName.size() <= 50
+        && d.latestDailyTokens is int
+        && d.latestDailyTokens >= 0
+        && d.latestMonthlyTokens is int
+        && d.latestMonthlyTokens >= 0
+        && d.lastUpdated is timestamp;
+    }
+
     match /users/{userId} {
-      // For this native mac app leaderboard, we allow any authenticated or unauthenticated
-      // user to read the leaderboard (so friends can see each other) and write their own
-      // usage data.
-      allow read: if true;
-      allow write: if true;
+      // Point reads only: the owner, or someone who holds an explicit friend
+      // relationship. `list` stays denied so usage data can't be enumerated.
+      allow get: if isOwner(userId) || isFriendOf(userId);
+      allow list: if false;
+
+      // Ownership is the document ID itself, so it can never be reassigned.
+      allow create, update: if isOwner(userId) && isValidUserDoc();
+      allow delete: if isOwner(userId);
+
+      match /friends/{friendUid} {
+        // Only the owner may see or manage their friend list.
+        allow read: if isOwner(userId);
+        allow delete: if isOwner(userId);
+
+        // Creating a friendship requires presenting the friend's invite code,
+        // and the code must resolve to exactly the uid being added. This is
+        // what stops a client granting itself read access to arbitrary users.
+        allow create: if isOwner(userId)
+          && friendUid != userId
+          && request.resource.data.keys().hasOnly(['inviteCode', 'addedAt'])
+          && request.resource.data.keys().hasAll(['inviteCode', 'addedAt'])
+          && request.resource.data.inviteCode is string
+          && request.resource.data.addedAt is timestamp
+          && get(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.uid == friendUid;
+
+        allow update: if false;
+      }
+    }
+
+    match /inviteCodes/{code} {
+      // Point lookup by exact code for any signed-in user; enumeration denied.
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      // A user registers their own code. `create` (never `update`) means an
+      // existing code can never be re-pointed at a different uid.
+      allow create: if isSignedIn()
+        && code.matches('^[0-9A-HJKMNP-TV-Z]{16}$')
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.keys().hasAll(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is timestamp;
+
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Everything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

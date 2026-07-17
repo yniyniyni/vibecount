@@ -1,12 +1,12 @@
 import AppKit
-import FirebaseCore
 import SwiftUI
 import SwiftData
+import os
 
 @main
 struct VibeCountApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     var body: some Scene {
         Settings {
             EmptyView()
@@ -18,7 +18,7 @@ struct VibeCountApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
-    var syncService: SyncService?
+    var syncService: (any SyncService)?
     var usageMonitor: UsageMonitor = ClaudeUsageMonitor()
     var updateTimer: Timer?
     var popover: NSPopover!
@@ -27,24 +27,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Firestore write, so rapid triggers (repeated popover opens, timer + manual
     /// refresh) must not stack up and race the button title / network writes.
     var isPolling = false
-    
+
+    private let logger = Logger(subsystem: "com.vibecount.app", category: "app")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             container = try ModelContainer(for: User.self, Friend.self)
-            
-            // Clean up mock data and legacy localUser from SwiftData
-            let context = container!.mainContext
-            if let friends = try? context.fetch(FetchDescriptor<Friend>()) {
-                for friend in friends {
-                    if ["mock1", "mock2", "localUser"].contains(friend.friendId) {
-                        context.delete(friend)
-                    }
-                }
-                try? context.save()
-            }
-            
         } catch {
-            print("Failed to create ModelContainer: \(error)")
+            logger.fault("Failed to create ModelContainer: \(error, privacy: .public)")
         }
 
         // A nil container means the on-disk store failed to open or migrate.
@@ -59,26 +49,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
-        // Try configuring Firebase
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           FileManager.default.fileExists(atPath: path) {
-            FirebaseApp.configure()
-            syncService = FirebaseSyncService(container: container)
-            syncService?.startSyncing()
+        // Sync config rides in GoogleService-Info.plist, which only the .app
+        // bundle built by scripts/build-app.sh provides. Without it, run
+        // local-only — real data for the local user, never fabricated friends.
+        let service: any SyncService
+        if let config = FirebaseConfig.load() {
+            service = FirestoreSyncService(
+                container: container, backend: FirestoreClient(config: config))
         } else {
-            print("No GoogleService-Info.plist found. Falling back to MockSyncService.")
-            Task { @MainActor in
-                syncService = MockSyncService(context: container.mainContext)
-                syncService?.startSyncing()
-            }
+            logger.notice("No GoogleService-Info.plist in Bundle.main — running local-only.")
+            service = LocalOnlySyncService(context: container.mainContext)
         }
-        
+        syncService = service
+
         // Setup Popover
         let dashboard = DashboardView()
+            .modelContainer(container)
+            .environment(service.status)
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: dashboard.modelContainer(container))
+        popover.contentViewController = NSHostingController(rootView: dashboard)
         popover.delegate = self
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -87,33 +78,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
-        
-        // Setup event monitor to close popover when clicking outside
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let popover = self?.popover, popover.isShown {
-                popover.performClose(event)
+
+        // Setup event monitor to close popover when clicking outside. The
+        // handler is nonisolated, so hop to the main actor before touching UI.
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let popover = self.popover, popover.isShown else { return }
+                popover.performClose(nil)
             }
         }
-        
-        // Listen for AddFriend Notification from SwiftUI
+
+        // Listen for dashboard actions posted from SwiftUI
         NotificationCenter.default.addObserver(self, selector: #selector(addFriend), name: NSNotification.Name("AddFriend"), object: nil)
-        
-        // Listen for RefreshData Notification from SwiftUI
+        NotificationCenter.default.addObserver(self, selector: #selector(removeFriend(_:)), name: NSNotification.Name("RemoveFriend"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(manualRefresh), name: NSNotification.Name("RefreshData"), object: nil)
-        
+
         // Start polling usage
         updateTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.pollUsage()
             }
         }
-        pollUsage()
+
+        // Establish sync (identity + listeners) first so the first poll can
+        // push under the authenticated identity, then poll immediately.
+        Task { @MainActor [weak self] in
+            await self?.syncService?.startSyncing()
+            self?.pollUsage()
+        }
     }
-    
+
     @objc func manualRefresh() {
         pollUsage()
     }
-    
+
     func popoverWillShow(_ notification: Notification) {
         // Refresh right before the popover appears so it never shows data older
         // than the 600s polling interval, regardless of how it was opened.
@@ -130,21 +128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
     }
-    
-    func getOrCreateLocalUser() -> User? {
-        guard let context = container?.mainContext else { return nil }
-        let descriptor = FetchDescriptor<User>()
-        if let user = try? context.fetch(descriptor).first {
-            return user
-        }
-        
-        let newUserId = UUID().uuidString.prefix(8).lowercased()
-        let newUser = User(userId: String(newUserId), displayName: NSFullUserName(), inviteCode: String(newUserId))
-        context.insert(newUser)
-        try? context.save()
-        return newUser
-    }
-    
+
     func pollUsage() {
         // Skip if a poll is already in flight so overlapping triggers can't stack
         // concurrent disk scans / Firestore writes or race the button title.
@@ -152,57 +136,80 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         isPolling = true
         Task { @MainActor in
             defer { isPolling = false }
-            do {
-                let usage = try await usageMonitor.fetchUsage()
-                let dailyTokens = usage.daily
-                let monthlyTokens = usage.monthly
 
-                // Update menu bar text (leading space separates it from the flame icon)
-                if let button = statusItem?.button {
-                    button.title = " " + dailyTokens.formattedTokenCount
-                }
-                
-                // Get local user
-                guard let user = getOrCreateLocalUser() else { return }
-                
-                // Push to sync service
-                try await syncService?.pushLocalUsage(userId: user.userId, displayName: user.displayName, dailyTokens: dailyTokens, monthlyTokens: monthlyTokens)
-                
+            let usage: DailyMonthlyUsage
+            do {
+                usage = try await usageMonitor.fetchUsage()
+            } catch is CancellationError {
+                return
             } catch {
-                print("Failed to fetch usage: \(error)")
+                // A local disk-scan problem — reported distinctly from any
+                // sync failure below so the two can't be confused.
+                logger.error("Reading Claude usage logs failed: \(error, privacy: .public)")
+                syncService?.status.lastError = "Couldn't read the Claude usage logs."
+                return
+            }
+
+            // Update menu bar text (leading space separates it from the flame icon)
+            if let button = statusItem?.button {
+                button.title = " " + usage.daily.formattedTokenCount
+            }
+
+            do {
+                try await syncService?.pushLocalUsage(dailyTokens: usage.daily, monthlyTokens: usage.monthly)
+            } catch {
+                logger.error("Pushing usage failed: \(error, privacy: .public)")
+                syncService?.status.lastError = "Sync failed: \(error.localizedDescription)"
             }
         }
     }
-    
+
     @objc func addFriend() {
         let alert = NSAlert()
         alert.messageText = "Add Friend"
-        alert.informativeText = "Enter your friend's Invite Code (User ID):"
+        alert.informativeText = "Enter your friend's invite code:"
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
-        
+
         let inputTextField = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
-        inputTextField.placeholderString = "e.g. some-user-id"
+        inputTextField.placeholderString = "e.g. ABCD-EFGH-2345-6789"
         alert.accessoryView = inputTextField
-        
+
         // Show window and bring to front
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
-        
-        if response == .alertFirstButtonReturn {
-            let friendId = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !friendId.isEmpty {
-                Task { @MainActor in
-                    guard let context = container?.mainContext else { return }
-                    
-                    let descriptor = FetchDescriptor<Friend>(predicate: #Predicate { $0.friendId == friendId })
-                    if (try? context.fetch(descriptor).first) == nil {
-                        let newFriend = Friend(friendId: friendId, displayName: "Loading...", latestDailyTokens: 0, latestMonthlyTokens: 0, lastUpdated: Date())
-                        context.insert(newFriend)
-                        try? context.save()
-                    }
-                }
+        guard response == .alertFirstButtonReturn else { return }
+
+        let code = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else { return }
+
+        Task { @MainActor in
+            do {
+                try await syncService?.addFriend(inviteCode: code)
+            } catch {
+                self.presentError(title: "Couldn't Add Friend", error: error)
             }
         }
+    }
+
+    @objc func removeFriend(_ notification: Notification) {
+        guard let friendId = notification.userInfo?["friendId"] as? String else { return }
+        Task { @MainActor in
+            do {
+                try await syncService?.removeFriend(friendId: friendId)
+            } catch {
+                self.presentError(title: "Couldn't Remove Friend", error: error)
+            }
+        }
+    }
+
+    private func presentError(title: String, error: Error) {
+        logger.error("\(title, privacy: .public): \(error, privacy: .public)")
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 }

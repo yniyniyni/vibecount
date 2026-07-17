@@ -1,0 +1,14 @@
+{
+  "name": "firestore-tests",
+  "private": true,
+  "type": "module",
+  "description": "Firestore security-rules tests for VibeCount, run against the Firestore emulator.",
+  "scripts": {
+    "test": "firebase emulators:exec --only firestore --project demo-vibecount \"node --test test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.16.0",
+    "firebase-tools": "^14.27.0"
+  }
+}

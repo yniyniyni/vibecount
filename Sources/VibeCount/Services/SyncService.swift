@@ -1,101 +1,78 @@
+// Sources/VibeCount/Services/SyncService.swift
 import Foundation
-import SwiftData
-import FirebaseCore
-@preconcurrency import FirebaseFirestore
+import Observation
 
-@MainActor
-public protocol SyncService: Sendable {
-    func startSyncing()
-    func stopSyncing()
-    func pushLocalUsage(userId: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) async throws
+/// How the app is currently persisting leaderboard data.
+public enum SyncMode: Sendable, Equatable {
+    /// Cross-device sync through Firebase (anonymous auth + Firestore).
+    case firebase
+    /// No Firebase configuration bundled: only the local user's own usage is
+    /// tracked, on this machine, and friends are unavailable.
+    case localOnly
 }
 
-@MainActor
-public final class MockSyncService: SyncService {
-    private let context: ModelContext
-    
-    public init(context: ModelContext) {
-        self.context = context
-    }
-    
-    public func startSyncing() {
-        print("MockSyncService: Started syncing")
-        // Create some mock friends
-        let f1 = Friend(friendId: "mock1", displayName: "Alice", latestDailyTokens: 45000, latestMonthlyTokens: 1_200_000, lastUpdated: Date())
-        let f2 = Friend(friendId: "mock2", displayName: "Bob", latestDailyTokens: 12000, latestMonthlyTokens: 300_000, lastUpdated: Date())
-        context.insert(f1)
-        context.insert(f2)
-        try? context.save()
-    }
-    
-    public func stopSyncing() {
-        print("MockSyncService: Stopped syncing")
-    }
-    
-    public func pushLocalUsage(userId: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) async throws {
-        print("MockSyncService: Pushed \(dailyTokens) daily, \(monthlyTokens) monthly tokens for \(displayName)")
+public enum SyncError: LocalizedError, Equatable {
+    case notConfigured
+    case notSignedIn
+    case invalidInviteCodeFormat
+    case inviteCodeNotFound
+    case ownInviteCode
+    case friendUserMissing
+    case inviteCodeRegistrationFailed
 
-        Friend.upsert(friendId: userId, displayName: displayName, dailyTokens: dailyTokens, monthlyTokens: monthlyTokens, in: context)
-        try? context.save()
-    }
-}
-
-@MainActor
-public final class FirebaseSyncService: SyncService {
-    private let db = Firestore.firestore()
-    private var listener: ListenerRegistration?
-    private let container: ModelContainer
-    
-    public init(container: ModelContainer) {
-        self.container = container
-    }
-    
-    public func startSyncing() {
-        // Listen to the 'users' collection in Firestore
-        listener = db.collection("users").addSnapshotListener { [weak self] snapshot, error in
-            guard let documents = snapshot?.documents, error == nil else {
-                print("Error fetching snapshot: \(error?.localizedDescription ?? "Unknown error")")
-                return
-            }
-            
-            Task { @MainActor in
-                guard let self = self else { return }
-                let context = self.container.mainContext
-                
-                for document in documents {
-                    let data = document.data()
-                    let id = document.documentID
-                    let displayName = data["displayName"] as? String ?? "Unknown"
-                    let dTokens = data["latestDailyTokens"] as? Int ?? 0
-                    let mTokens = data["latestMonthlyTokens"] as? Int ?? 0
-
-                    Friend.upsert(friendId: id, displayName: displayName, dailyTokens: dTokens, monthlyTokens: mTokens, in: context)
-                }
-                try? context.save()
-            }
+    public var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            "Friends require Firebase sync, which isn't set up on this install. See the README for setup."
+        case .notSignedIn:
+            "Not signed in to sync yet — check your network connection and try again."
+        case .invalidInviteCodeFormat:
+            "That doesn't look like a valid invite code."
+        case .inviteCodeNotFound:
+            "No user was found for that invite code."
+        case .ownInviteCode:
+            "That's your own invite code."
+        case .friendUserMissing:
+            "That invite code's user no longer exists."
+        case .inviteCodeRegistrationFailed:
+            "Couldn't register an invite code for this device."
         }
     }
-    
-    public func stopSyncing() {
-        listener?.remove()
-        listener = nil
-    }
-    
-    public func pushLocalUsage(userId: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) async throws {
-        // Save to local SwiftData context so user appears in UI instantly
-        let context = container.mainContext
-        Friend.upsert(friendId: userId, displayName: displayName, dailyTokens: dailyTokens, monthlyTokens: monthlyTokens, in: context)
-        try? context.save()
+}
 
-        // Push to Firebase
-        let data: [String: Any] = [
-            "displayName": displayName,
-            "latestDailyTokens": dailyTokens,
-            "latestMonthlyTokens": monthlyTokens,
-            "lastUpdated": FieldValue.serverTimestamp()
-        ]
-        try await db.collection("users").document(userId).setData(data, merge: true)
+/// Small observable surface the dashboard reads to show sync state, so
+/// failures land in the UI instead of only in log lines.
+@MainActor
+@Observable
+public final class SyncStatus {
+    public let mode: SyncMode
+    /// Human-readable description of the most recent failure; nil when healthy.
+    public var lastError: String?
+
+    public init(mode: SyncMode, lastError: String? = nil) {
+        self.mode = mode
+        self.lastError = lastError
     }
 }
 
+@MainActor
+public protocol SyncService: AnyObject {
+    var status: SyncStatus { get }
 
+    /// Establish identity and listeners. Idempotent — safe to call repeatedly,
+    /// so a launch without network heals itself on a later poll.
+    func startSyncing() async
+
+    /// Tear down all listeners. Idempotent.
+    func stopSyncing()
+
+    /// Persist the local user's usage locally and (when syncing) remotely.
+    func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws
+
+    /// Resolve an invite code to a real user and add them as a friend.
+    /// Throws a `SyncError` describing exactly why a code couldn't be added.
+    func addFriend(inviteCode: String) async throws
+
+    /// Remove a friend relationship and its local leaderboard row.
+    func removeFriend(friendId: String) async throws
+}
