@@ -247,9 +247,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     func commitSyncConfig(_ config: SyncConfig, session: StoredAuthSession) async throws {
         guard let container else { throw SyncError.notConfigured }
         let authStore = AuthSessionStore()
-        try BackendSwitcher.prepareForNewBackend(context: container.mainContext, authStore: authStore)
+        // Save-then-purge: a failed save leaves the old identity + config
+        // fully intact. A failed purge (after both saves succeed) leaves only
+        // stale local friend rows, which refreshLeaderboard's removeAll-except
+        // reconciliation cleans up once the new backend starts syncing.
         try authStore.save(session)
         try syncConfigStore.save(config)
+        try BackendSwitcher.prepareForNewBackend(context: container.mainContext)
 
         syncService?.stopSyncing()
         let service = FirestoreSyncService(
@@ -286,6 +290,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 },
                 commit: { [weak self] config, session in
                     try await self?.commitSyncConfig(config, session: session)
+                },
+                fetchOwnInviteCode: { [weak self] in
+                    try? self?.container?.mainContext.fetch(FetchDescriptor<User>()).first?.inviteCode
                 },
                 dismiss: { [weak self] in
                     self?.setupWindow?.close()

@@ -113,10 +113,7 @@ struct SetupView: View {
                 if let shareLink = model.shareLink {
                     Text("Send this link to a friend so they can join your group:")
                         .foregroundStyle(.secondary)
-                    HStack {
-                        Text(shareLink).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
-                        Button("Copy") { Clipboard.copy(shareLink) }
-                    }
+                    shareLinkRow(shareLink)
                 }
                 Divider()
                 Button("Switch to a different group…") { model.route = .welcome }
@@ -130,6 +127,15 @@ struct SetupView: View {
     }
 
     // MARK: Shared pieces
+
+    /// A join link plus copy button, shown identically in the settings screen
+    /// (existing group) and the success footer (just-committed group).
+    private func shareLinkRow(_ link: String) -> some View {
+        HStack {
+            Text(link).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+            Button("Copy") { Clipboard.copy(link) }
+        }
+    }
 
     private func stepHeader(_ number: Int, _ title: String) -> some View {
         HStack(spacing: 8) {
@@ -155,10 +161,11 @@ struct SetupView: View {
                 Label("Connected!", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                 if let shareLink = model.shareLink {
                     Text("Share this link so friends can join:").font(.caption)
-                    HStack {
-                        Text(shareLink).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
-                        Button("Copy") { Clipboard.copy(shareLink) }
-                    }
+                    shareLinkRow(shareLink)
+                }
+                if let ownInviteCode = model.ownInviteCode {
+                    LabeledContent("Your invite code", value: InviteCode.display(ownInviteCode))
+                        .font(.caption)
                 }
                 Button("Done") { model.actions.dismiss() }.buttonStyle(.borderedProminent)
             }
