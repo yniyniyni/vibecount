@@ -201,21 +201,111 @@ public final class FirestoreSyncService: SyncService {
             try reconciler.removeAll(except: desired)
         } catch {
             logger.error("Leaderboard refresh failed: \(error, privacy: .public)")
-            status.lastError = "Couldn't refresh the leaderboard."
+            // Don't clobber a more specific error already surfaced this cycle
+            // (e.g. the push that triggered this refresh) — a knock-on
+            // failure here is usually the same underlying network problem.
+            if status.lastError == nil {
+                status.lastError = "Couldn't refresh the leaderboard."
+            }
         }
     }
 
-    // MARK: - SyncService (completed in the next task)
+    // MARK: - SyncService
 
     public func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws {
-        throw SyncError.notSignedIn // implemented in Task 6
+        guard started, let uid = ownUid else {
+            // Kick a (re)start for the next poll, but never block this one on
+            // it — a hung start must not wedge the polling pipeline.
+            Task { await self.startSyncing() }
+            throw SyncError.notSignedIn
+        }
+        let user = try requireLocalUser()
+        let displayName = User.sanitizedDisplayName(user.displayName)
+
+        // Local row first so the UI reflects this poll even if the network
+        // write below fails.
+        try reconciler.upsert(id: uid, displayName: displayName,
+                              dailyTokens: dailyTokens, monthlyTokens: monthlyTokens)
+
+        // The remote write is non-fatal: surface failures through status and
+        // let the next poll retry. No offline queue by design.
+        do {
+            try await backend.patchDocument(path: "users/\(uid)", fields: [
+                "displayName": .string(displayName),
+                "latestDailyTokens": .integer(max(0, dailyTokens)),
+                "latestMonthlyTokens": .integer(max(0, monthlyTokens)),
+                "lastUpdated": .timestamp(Date()),
+            ])
+            status.lastError = nil
+        } catch {
+            logger.error("Usage push failed: \(error, privacy: .public)")
+            status.lastError = "Sync failed: \(error.localizedDescription)"
+        }
+
+        // Polling model: every push also refreshes the leaderboard.
+        await refreshLeaderboard()
     }
 
     public func addFriend(inviteCode rawCode: String) async throws {
-        throw SyncError.notSignedIn // implemented in Task 6
+        await startSyncing()
+        guard started, let uid = ownUid else {
+            throw SyncError.notSignedIn
+        }
+        guard let code = InviteCode.normalize(rawCode) else {
+            throw SyncError.invalidInviteCodeFormat
+        }
+
+        guard let codeDoc = try await backend.getDocument(path: "inviteCodes/\(code)"),
+              let friendUid = codeDoc.fields["uid"]?.stringValue else {
+            throw SyncError.inviteCodeNotFound
+        }
+        guard friendUid != uid else {
+            throw SyncError.ownInviteCode
+        }
+
+        // Relationships are create-only in the rules; re-adding an existing
+        // friend must not attempt an (always denied) update.
+        let relationshipPath = "users/\(uid)/friends/\(friendUid)"
+        var createdNow = false
+        do {
+            try await backend.createDocument(
+                parent: "users/\(uid)/friends", documentID: friendUid,
+                fields: ["inviteCode": .string(code), "addedAt": .timestamp(Date())])
+            createdNow = true
+        } catch FirestoreClientError.alreadyExists {
+            // Already friends — fine.
+        }
+
+        // The relationship is what authorizes reading the friend's doc, so
+        // resolve it only now. A missing doc means the code is stale: roll the
+        // relationship back and surface a visible error — never a permanent
+        // placeholder row.
+        let friendDoc: FirestoreDocument?
+        do {
+            friendDoc = try await backend.getDocument(path: "users/\(friendUid)")
+        } catch {
+            if createdNow { try? await backend.deleteDocument(path: relationshipPath) }
+            throw error
+        }
+        guard let friendDoc else {
+            if createdNow { try? await backend.deleteDocument(path: relationshipPath) }
+            throw SyncError.friendUserMissing
+        }
+
+        try reconciler.upsert(
+            id: friendUid,
+            displayName: friendDoc.fields["displayName"]?.stringValue ?? "Unknown",
+            dailyTokens: friendDoc.fields["latestDailyTokens"]?.integerValue ?? 0,
+            monthlyTokens: friendDoc.fields["latestMonthlyTokens"]?.integerValue ?? 0)
     }
 
     public func removeFriend(friendId: String) async throws {
-        throw SyncError.notSignedIn // implemented in Task 6
+        guard started, let uid = ownUid else {
+            throw SyncError.notSignedIn
+        }
+        guard friendId != uid else { return } // the UI never offers this
+
+        try await backend.deleteDocument(path: "users/\(uid)/friends/\(friendId)")
+        try reconciler.remove(id: friendId)
     }
 }
