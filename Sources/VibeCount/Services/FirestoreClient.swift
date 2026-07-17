@@ -127,7 +127,13 @@ actor FirestoreClient {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(status) else {
             let message = ((json["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(status)"
-            throw FirestoreClientError.authFailed(message)
+            // 4xx means the server definitively rejected this credential or
+            // request. Anything else (5xx, 429) is transient: the caller must
+            // NOT treat it as a revoked identity.
+            if (400..<429).contains(status) {
+                throw FirestoreClientError.authFailed(message)
+            }
+            throw FirestoreClientError.http(status, message)
         }
         return json
     }
