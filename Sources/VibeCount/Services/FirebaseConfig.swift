@@ -75,3 +75,17 @@ struct AuthSessionStore: Sendable {
         try? FileManager.default.removeItem(at: fileURL)
     }
 }
+
+extension FirebaseConfig {
+    init(_ syncConfig: SyncConfig) {
+        self.init(apiKey: syncConfig.apiKey, projectID: syncConfig.projectID)
+    }
+
+    /// Precedence: user-entered stored config → bundled plist → nil
+    /// (local-only). `bundled` is injected (callers pass `FirebaseConfig.load()`)
+    /// so the order is unit-testable without fabricating bundles.
+    static func resolve(store: SyncConfigStore, bundled: FirebaseConfig?) -> FirebaseConfig? {
+        if let stored = store.load() { return FirebaseConfig(stored) }
+        return bundled
+    }
+}
