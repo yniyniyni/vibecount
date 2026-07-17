@@ -34,11 +34,51 @@ struct SetupView: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Set Up Leaderboard Sync").font(.title2.bold())
-            Text("VibeCount can sync a leaderboard with friends through a Firebase project one of you hosts. It's free and takes a few minutes.")
+            Text("Sync a leaderboard with friends. Use the free shared cloud, or host your own Firebase project.")
                 .foregroundStyle(.secondary)
-            Button("Host a group…") { model.route = .host }
-                .buttonStyle(.borderedProminent)
-            Button("Join a group…") { model.route = .join }
+
+            Button {
+                Task { await model.submitDefaultCloud() }
+            } label: {
+                if model.phase == .validating || model.isSigningInWithGoogle {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(model.isSigningInWithGoogle ? "Waiting for Google…" : "Connecting…")
+                    }
+                } else {
+                    Text("Use VibeCount cloud")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.phase == .validating || model.isSigningInWithGoogle)
+            Text("No Firebase setup — joins the shared project. Google sign-in is required.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if case .failure(let message) = model.phase {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if model.phase == .needsGoogleSignIn {
+                Label("Connected — finish with Google sign-in", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .foregroundStyle(.orange)
+                googleRow
+            }
+            if model.phase == .success {
+                Label("Connected to VibeCount cloud!", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                // No project/link on cloud — friends use invite codes only.
+                if let ownInviteCode = model.ownInviteCode {
+                    LabeledContent("Your invite code", value: InviteCode.display(ownInviteCode))
+                        .font(.caption)
+                }
+                googleRow
+                Button("Done") { model.actions.dismiss() }.buttonStyle(.borderedProminent)
+            }
+
+            Divider()
+            Text("Or self-host").font(.headline)
+            Button("Host your own group…") { model.route = .host; model.phase = .idle }
+            Button("Join a self-hosted group…") { model.route = .join; model.phase = .idle }
             Button("Maybe later") { model.actions.dismiss() }
                 .buttonStyle(.link)
             Text("Without sync the app still tracks your own usage, locally.")
@@ -123,22 +163,55 @@ struct SetupView: View {
     private var settings: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Sync Settings").font(.title2.bold())
-            if let config = model.currentConfig {
-                LabeledContent("Project", value: config.projectID)
-                if let shareLink = model.shareLink {
-                    Text("Send this link to a friend so they can join your group:")
-                        .foregroundStyle(.secondary)
-                    shareLinkRow(shareLink)
+            if model.currentConfig != nil {
+                if model.isOnDefaultCloud {
+                    LabeledContent("Backend", value: "VibeCount cloud (shared)")
+                } else if let config = model.currentConfig {
+                    // Self-host only: project id + join link matter for that path.
+                    LabeledContent("Project", value: config.projectID)
+                    if let shareLink = model.shareLink {
+                        Text("Send this link to a friend so they can join your group:")
+                            .foregroundStyle(.secondary)
+                        shareLinkRow(shareLink)
+                    }
+                }
+                if model.googleSignInRequired {
+                    Label("Google sign-in is required for VibeCount cloud.",
+                          systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 googleRow
                 Divider()
-                Button("Switch to a different group…") { model.route = .welcome }
+                Button("Switch to a different group…") { model.route = .welcome; model.phase = .idle }
             } else {
                 Text("Sync isn't set up on this Mac yet.").foregroundStyle(.secondary)
-                Button("Set up sync…") { model.route = .welcome }
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    Task { await model.submitDefaultCloud() }
+                } label: {
+                    if model.phase == .validating || model.isSigningInWithGoogle {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text(model.isSigningInWithGoogle ? "Waiting for Google…" : "Connecting…")
+                        }
+                    } else {
+                        Text("Use VibeCount cloud")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.phase == .validating || model.isSigningInWithGoogle)
+                Text("No Firebase setup — Google sign-in required.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if case .failure(let message) = model.phase {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if model.phase == .needsGoogleSignIn {
+                    googleRow
+                }
+                Button("Set up self-hosted sync…") { model.route = .welcome; model.phase = .idle }
             }
             Button("Done") { model.actions.dismiss() }
+                .disabled(model.googleSignInRequired)
         }
     }
 
@@ -175,7 +248,8 @@ struct SetupView: View {
         case .success:
             VStack(alignment: .leading, spacing: 8) {
                 Label("Connected!", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                if let shareLink = model.shareLink {
+                // Join links are for self-host; cloud members add friends via invite code.
+                if !model.isOnDefaultCloud, let shareLink = model.shareLink {
                     Text("Share this link so friends can join:").font(.caption)
                     shareLinkRow(shareLink)
                 }
@@ -185,6 +259,15 @@ struct SetupView: View {
                 }
                 googleRow
                 Button("Done") { model.actions.dismiss() }.buttonStyle(.borderedProminent)
+            }
+        case .needsGoogleSignIn:
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Almost done — Google sign-in required",
+                      systemImage: "person.crop.circle.badge.exclamationmark")
+                    .foregroundStyle(.orange)
+                Text("VibeCount cloud needs a Google account so your stats and friends survive reinstalls.")
+                    .font(.caption).foregroundStyle(.secondary)
+                googleRow
             }
         case .validating:
             HStack { ProgressView().controlSize(.small); Text("Checking the configuration…") }
@@ -253,7 +336,9 @@ struct SetupView: View {
                     }
                 }
                 .disabled(model.isSigningInWithGoogle)
-                Text("Protects your identity: reinstalling or moving to a new Mac keeps your stats and friends.")
+                Text(model.googleSignInRequired
+                     ? "Required on VibeCount cloud: your stats and friends stay with this Google account."
+                     : "Protects your identity: reinstalling or moving to a new Mac keeps your stats and friends.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let signInError = model.signInError {
                     Label(signInError, systemImage: "exclamationmark.triangle.fill")

@@ -24,7 +24,11 @@ struct SetupActions {
 @Observable
 final class SetupModel {
     enum Route: Equatable { case welcome, host, join, settings }
-    enum Phase: Equatable { case idle, validating, failure(String), success }
+    enum Phase: Equatable {
+        case idle, validating, failure(String), success
+        /// Connected to VibeCount cloud but Google link is still required.
+        case needsGoogleSignIn
+    }
 
     var route: Route
     var phase: Phase = .idle
@@ -43,11 +47,15 @@ final class SetupModel {
 
     init(route: Route, currentConfig: SyncConfig?, ownInviteCode: String?,
          linkedEmail: String? = nil, actions: SetupActions) {
+        // Older cloud installs may lack the shared OAuth pair on disk.
         self.route = route
-        self.currentConfig = currentConfig
+        self.currentConfig = currentConfig.map(DefaultSyncProject.enriched)
         self.ownInviteCode = ownInviteCode
         self.linkedEmail = linkedEmail
         self.actions = actions
+        if DefaultSyncProject.matches(self.currentConfig), linkedEmail == nil {
+            self.phase = .needsGoogleSignIn
+        }
     }
 
     /// Whether committing right now would abandon an existing identity.
@@ -66,18 +74,41 @@ final class SetupModel {
         return link.url.absoluteString
     }
 
+    /// True when the current stored config is the shared cloud.
+    var isOnDefaultCloud: Bool { DefaultSyncProject.matches(currentConfig) }
+
+    /// VibeCount cloud requires a linked Google account; self-host does not.
+    var googleSignInRequired: Bool {
+        isOnDefaultCloud && linkedEmail == nil
+    }
+
     /// Show the sign-in button only when the group has a client pair and this
-    /// install isn't linked yet.
+    /// install isn't linked yet. Cloud always has the shared OAuth pair.
     var googleSignInAvailable: Bool {
-        currentConfig?.googleClientID != nil
+        guard linkedEmail == nil else { return false }
+        if isOnDefaultCloud { return true }
+        return currentConfig?.googleClientID != nil
             && currentConfig?.googleClientSecret != nil
-            && linkedEmail == nil
     }
 
     func prefill(joinLink: JoinLink) {
         route = .join
         joinText = joinLink.url.absoluteString
         phase = .idle
+    }
+
+    /// Connects to the shared VibeCount Firebase project, then requires Google
+    /// sign-in so the identity is durable (reinstall / new Mac recovery).
+    func submitDefaultCloud() async {
+        await validateAndCommit(DefaultSyncProject.syncConfig)
+        guard phase == .success || phase == .needsGoogleSignIn else { return }
+        await signInWithGoogle()
+        if linkedEmail == nil {
+            phase = .needsGoogleSignIn
+            if signInError == nil {
+                signInError = "Google sign-in is required for VibeCount cloud."
+            }
+        }
     }
 
     func submitHost() async {
@@ -112,6 +143,17 @@ final class SetupModel {
             config.googleClientID = link.googleClientID
             config.googleClientSecret = link.googleClientSecret
             await validateAndCommit(config)
+            // Joining the shared cloud also requires Google (same policy as
+            // the welcome "Use VibeCount cloud" path).
+            if phase == .success, DefaultSyncProject.matches(currentConfig) {
+                await signInWithGoogle()
+                if linkedEmail == nil {
+                    phase = .needsGoogleSignIn
+                    if signInError == nil {
+                        signInError = "Google sign-in is required for VibeCount cloud."
+                    }
+                }
+            }
         }
     }
 
@@ -122,14 +164,25 @@ final class SetupModel {
         defer { isSigningInWithGoogle = false }
         do {
             linkedEmail = try await actions.signInWithGoogle() ?? "Google account"
+            if linkedEmail != nil, phase == .needsGoogleSignIn {
+                phase = .success
+            }
         } catch GoogleSignInError.cancelled {
-            // Closed tab / denied consent / timeout — quiet by design.
+            // Self-host: quiet cancel. Cloud: surface that sign-in is mandatory.
+            if googleSignInRequired {
+                signInError = "Google sign-in is required for VibeCount cloud."
+                phase = .needsGoogleSignIn
+            }
         } catch {
             signInError = error.localizedDescription
+            if googleSignInRequired {
+                phase = .needsGoogleSignIn
+            }
         }
     }
 
     private func validateAndCommit(_ config: SyncConfig) async {
+        let config = DefaultSyncProject.enriched(config)
         phase = .validating
         // Scratch store: validation is the real first sign-in, but the session
         // only becomes THE identity if everything succeeds — a failed attempt
@@ -151,7 +204,12 @@ final class SetupModel {
                 try await actions.commit(config, session)
                 currentConfig = config
                 ownInviteCode = actions.fetchOwnInviteCode() ?? ownInviteCode
-                phase = .success
+                // Cloud without a linked Google account is only half-done.
+                if DefaultSyncProject.matches(config), linkedEmail == nil {
+                    phase = .needsGoogleSignIn
+                } else {
+                    phase = .success
+                }
             } catch {
                 phase = .failure(error.localizedDescription)
             }
