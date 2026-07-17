@@ -1,61 +1,102 @@
-# Vibe-Count
+# VibeCount
 
-Vibe-Count is a lightweight, competitive dashboard for friends to track their daily AI token usage (Anthropic/Claude, OpenAI). The app runs silently in your macOS menu bar, and whoever burns the most tokens by the end of the day "wins".
+**A native macOS menu-bar leaderboard for Claude Code token usage.**
 
-## Features
-- **Functional Minimalism:** Zero bloat, compact layout, clean typography.
-- **Strict Apple HIG Adherence:** Native macOS menu bar presence.
-- **Local-First Architecture:** Uses SwiftData for persistence.
-- **Swift 6 Concurrency:** Strict concurrency enforcement.
+VibeCount reads Claude Code session logs on your Mac, shows how many tokens you
+have used today and over the last 30 days, and optionally syncs those aggregate
+totals with friends.
+
+## What it does
+
+- Lives in the macOS menu bar with your current daily token count.
+- Reads local Claude Code JSONL logs from `~/.claude/projects`.
+- Ranks today and rolling 30-day usage in a compact native dashboard.
+- Works locally with no account or backend.
+- Syncs leaderboards through the shared VibeCount cloud or a self-hosted
+  Firebase project.
+- Adds friends with invite codes or self-hosted join links.
+
+Raw prompts and session logs never leave your Mac. When sync is enabled,
+VibeCount uploads your macOS display name, daily token total, rolling 30-day
+total, and update timestamp.
 
 ## Requirements
-- macOS 14+
+
+- macOS 14 or newer
+- Xcode 16 or newer with the Swift 6 toolchain
+- Claude Code usage logs for nonzero totals
+
+## Build and run
+
+Build the macOS app bundle:
+
+```bash
+scripts/build-app.sh release
+open build/VibeCount.app
+```
+
+The first launch offers three modes:
+
+| Mode | Setup | Behavior |
+| --- | --- | --- |
+| Local only | None | Stores and displays only this Mac's usage. |
+| VibeCount cloud | Google sign-in | Syncs aggregate usage through the shared Firebase project. |
+| Self-hosted | Your Firebase project | Uses the guided setup wizard and bundled security rules. |
+
+`swift run` is useful during development, but it creates a bare executable. It
+does not register the `vibecount://` join-link scheme or embed a repository-root
+`GoogleService-Info.plist`. A sync configuration previously saved through the
+app can still work with the bare executable.
+
+## Sync behavior
+
+VibeCount refreshes at launch, every 10 minutes, whenever the popover opens,
+and when you press `Command-R`. Sync uses the Firestore REST API and polling;
+there are no realtime listeners or offline write queue.
+
+For self-hosted sync, the in-app wizard walks through:
+
+1. Creating a Firebase project and Firestore database.
+2. Enabling Anonymous Authentication.
+3. Publishing the included Firestore security rules.
+4. Entering the project ID and Web API key.
+5. Optionally enabling Google sign-in for identity recovery.
+
+A bundled `GoogleService-Info.plist` remains available as a legacy fallback:
+
+```bash
+scripts/setup-firebase.sh /path/to/GoogleService-Info.plist
+scripts/build-app.sh release
+```
+
+Stored in-app configuration takes precedence over the bundled plist.
 
 ## Development
 
-To build and run tests:
+Run the Swift test suite:
+
 ```bash
 swift test
 ```
 
-To run the application directly from the CLI:
+Check that a tracked-files-only checkout has a valid Swift package:
+
 ```bash
-swift run
+bash scripts/check-clean-clone.sh
 ```
 
-## Firebase (cross-device leaderboard sync)
+Run Firestore security-rule tests with Node.js 20+ and JDK 21+:
 
-The app is local-first and runs fine without any setup — without a backend it
-tracks only your own usage. To sync a leaderboard with friends you can either
-use the **shared VibeCount cloud** or **self-host** a Firebase project:
-
-- **VibeCount cloud (no Firebase setup):** first launch (or *Sync Settings…*) →
-  **Use VibeCount cloud**. Joins the shared project (`vibe-count-app-0703`)
-  and **requires Sign in with Google** so your identity survives reinstalls.
-  Friends use invite codes / join links as usual on that shared backend.
-- **Host (self-host):** pick *Host your own group* and follow the guided
-  steps — the app opens the right Firebase console pages, gives you the
-  security rules to paste, validates the setup, and hands you a join link.
-- **Join (self-host):** click the `vibecount://join?…` link your host sent
-  (or paste it into *Join a self-hosted group*). The host is added as a
-  friend automatically.
-- **Optional Google sign-in:** if the host completes wizard step 6 (their own
-  Desktop OAuth client), members can click *Sign in with Google* in Sync
-  Settings to link their identity — reinstalling or moving to a new Mac then
-  recovers the same stats, friends, and invite code by signing in again.
-
-A `GoogleService-Info.plist` bundled by `scripts/build-app.sh` still works as
-a fallback backend (`scripts/setup-firebase.sh` installs one), but a stored
-GUI config (including VibeCount cloud) takes precedence when both exist.
-
-### Running with live sync
-
-`swift run` produces a bare executable with **no** app bundle, and Firebase does
-**not** sync in that context (you'd see only your own row, no error). Build a real
-`.app` bundle instead:
 ```bash
-scripts/build-app.sh          # → build/VibeCount.app (embeds the plist)
-open build/VibeCount.app
+cd firestore-tests
+npm ci
+npm test
 ```
-The flame icon's popover then shows live friends with updating token counts. Use
-`swift run` for local logic/dev; use the bundle for anything touching Firebase.
+
+## Release status
+
+The repository currently builds an ad-hoc-signed development bundle. It does
+not yet contain a Developer ID signing, hardened runtime, notarization, release
+CI, installer, or automatic-update pipeline. See the production-hardening plan
+in `docs/superpowers/plans/2026-07-17-production-hardening.md` before shipping a
+public release.
