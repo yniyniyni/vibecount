@@ -8,7 +8,9 @@ final class SetupViewTests: XCTestCase {
         SetupModel(route: route, currentConfig: nil, ownInviteCode: nil,
                    actions: SetupActions(
                        validate: { _, _ in .success("uid") },
-                       commit: { _, _ in }, dismiss: {}))
+                       commit: { _, _ in },
+                       fetchOwnInviteCode: { nil },
+                       dismiss: {}))
     }
 
     func testConstructsForEveryRoute() {

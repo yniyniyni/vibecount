@@ -8,6 +8,9 @@ struct SetupActions {
     /// Adopts the validated session, saves the config, and live-swaps the
     /// sync service (teardown of the old backend included).
     var commit: (SyncConfig, StoredAuthSession) async throws -> Void
+    /// Re-reads the local User's invite code after commit, because
+    /// startSyncing can regenerate it (e.g. on first registration).
+    var fetchOwnInviteCode: () -> String?
     /// Closes the setup window.
     var dismiss: () -> Void
 }
@@ -25,8 +28,8 @@ final class SetupModel {
     var apiKey = ""
     var joinText = ""
 
-    let currentConfig: SyncConfig?
-    let ownInviteCode: String?
+    private(set) var currentConfig: SyncConfig?
+    private(set) var ownInviteCode: String?
     let actions: SetupActions
 
     init(route: Route, currentConfig: SyncConfig?, ownInviteCode: String?, actions: SetupActions) {
@@ -36,8 +39,9 @@ final class SetupModel {
         self.actions = actions
     }
 
-    /// A stored config already exists, so applying a new one abandons the
-    /// current group — the UI must confirm before submitting.
+    /// Whether committing right now would abandon an existing identity.
+    /// Commit always replaces the current identity — even for an identical
+    /// config — so the UI must confirm whenever a config is already stored.
     var isSwitchingBackends: Bool { currentConfig != nil }
 
     /// The link any group member can send to a prospective friend.
@@ -95,6 +99,8 @@ final class SetupModel {
             }
             do {
                 try await actions.commit(config, session)
+                currentConfig = config
+                ownInviteCode = actions.fetchOwnInviteCode() ?? ownInviteCode
                 phase = .success
             } catch {
                 phase = .failure(error.localizedDescription)

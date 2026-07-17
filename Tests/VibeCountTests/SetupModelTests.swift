@@ -16,6 +16,7 @@ final class SetupModelTests: XCTestCase {
         ownInviteCode: String? = nil,
         validateResult: Result<String, ConfigValidationError> = .success("uid-1"),
         commitError: Error? = nil,
+        fetchOwnInviteCode: @escaping () -> String? = { nil },
         box: Box = Box()
     ) -> SetupModel {
         SetupModel(
@@ -32,12 +33,13 @@ final class SetupModelTests: XCTestCase {
                     if let commitError { throw commitError }
                     box.recorder.committed.append(config)
                 },
+                fetchOwnInviteCode: fetchOwnInviteCode,
                 dismiss: {}))
     }
 
     func testSubmitHostValidatesThenCommitsAndSucceeds() async {
         let box = Box()
-        let model = makeModel(route: .host, box: box)
+        let model = makeModel(route: .host, fetchOwnInviteCode: { "ABCDEFGH23456789" }, box: box)
         model.projectID = " my-proj "
         model.apiKey = " AIzaKey "
         await model.submitHost()
@@ -45,6 +47,10 @@ final class SetupModelTests: XCTestCase {
         XCTAssertEqual(box.recorder.validated, [FirebaseConfig(apiKey: "AIzaKey", projectID: "my-proj")])
         // Host config carries no hostInviteCode — hosts don't friend themselves.
         XCTAssertEqual(box.recorder.committed, [SyncConfig(projectID: "my-proj", apiKey: "AIzaKey", hostInviteCode: nil)])
+        // The success footer needs the NEW config's share link, not a stale
+        // one captured at window construction.
+        XCTAssertNotNil(model.shareLink)
+        XCTAssertTrue(model.shareLink?.contains("my-proj") ?? false)
     }
 
     func testSubmitHostFailureSurfacesErrorAndSkipsCommit() async {
@@ -54,6 +60,22 @@ final class SetupModelTests: XCTestCase {
         model.apiKey = "k"
         await model.submitHost()
         XCTAssertEqual(model.phase, .failure(ConfigValidationError.firestoreMissing.localizedDescription))
+        XCTAssertEqual(box.recorder.committed, [])
+    }
+
+    func testSubmitHostCommitFailureSurfacesError() async {
+        let box = Box()
+        let model = makeModel(
+            route: .host, commitError: CocoaError(.fileWriteUnknown), box: box)
+        model.projectID = "my-proj"
+        model.apiKey = "AIzaKey"
+        await model.submitHost()
+        guard case .failure = model.phase else {
+            return XCTFail("expected failure, got \(model.phase)")
+        }
+        // Validation still ran (and succeeded) before the commit threw — the
+        // failure is specifically a commit failure, not a validation failure.
+        XCTAssertEqual(box.recorder.validated, [FirebaseConfig(apiKey: "AIzaKey", projectID: "my-proj")])
         XCTAssertEqual(box.recorder.committed, [])
     }
 
