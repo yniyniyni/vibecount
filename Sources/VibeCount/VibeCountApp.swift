@@ -312,6 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 fetchOwnInviteCode: { [weak self] in
                     try? self?.container?.mainContext.fetch(FetchDescriptor<User>()).first?.inviteCode
                 },
+                signInWithGoogle: { nil },
                 dismiss: { [weak self] in
                     self?.setupWindow?.close()
                     self?.setupWindow = nil

@@ -11,6 +11,10 @@ struct SetupActions {
     /// Re-reads the local User's invite code after commit, because
     /// startSyncing can regenerate it (e.g. on first registration).
     var fetchOwnInviteCode: () -> String?
+    /// Runs the browser OAuth flow and links (or recovers) the identity.
+    /// Returns the linked Google email. Throws GoogleSignInError.cancelled
+    /// for quiet abandons; other errors surface to the user.
+    var signInWithGoogle: () async throws -> String?
     /// Closes the setup window.
     var dismiss: () -> Void
 }
@@ -27,15 +31,22 @@ final class SetupModel {
     var projectID = ""
     var apiKey = ""
     var joinText = ""
+    var googleClientIDField = ""
+    var googleClientSecretField = ""
+    private(set) var linkedEmail: String?
+    private(set) var isSigningInWithGoogle = false
+    var signInError: String?
 
     private(set) var currentConfig: SyncConfig?
     private(set) var ownInviteCode: String?
     let actions: SetupActions
 
-    init(route: Route, currentConfig: SyncConfig?, ownInviteCode: String?, actions: SetupActions) {
+    init(route: Route, currentConfig: SyncConfig?, ownInviteCode: String?,
+         linkedEmail: String? = nil, actions: SetupActions) {
         self.route = route
         self.currentConfig = currentConfig
         self.ownInviteCode = ownInviteCode
+        self.linkedEmail = linkedEmail
         self.actions = actions
     }
 
@@ -47,9 +58,20 @@ final class SetupModel {
     /// The link any group member can send to a prospective friend.
     var shareLink: String? {
         guard let currentConfig else { return nil }
-        return JoinLink(projectID: currentConfig.projectID,
-                        apiKey: currentConfig.apiKey,
-                        hostInviteCode: ownInviteCode).url.absoluteString
+        var link = JoinLink(projectID: currentConfig.projectID,
+                            apiKey: currentConfig.apiKey,
+                            hostInviteCode: ownInviteCode)
+        link.googleClientID = currentConfig.googleClientID
+        link.googleClientSecret = currentConfig.googleClientSecret
+        return link.url.absoluteString
+    }
+
+    /// Show the sign-in button only when the group has a client pair and this
+    /// install isn't linked yet.
+    var googleSignInAvailable: Bool {
+        currentConfig?.googleClientID != nil
+            && currentConfig?.googleClientSecret != nil
+            && linkedEmail == nil
     }
 
     func prefill(joinLink: JoinLink) {
@@ -65,7 +87,18 @@ final class SetupModel {
             phase = .failure("Enter both the Project ID and the Web API key.")
             return
         }
-        await validateAndCommit(SyncConfig(projectID: project, apiKey: key, hostInviteCode: nil))
+        let clientID = googleClientIDField.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientSecret = googleClientSecretField.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clientID.isEmpty == clientSecret.isEmpty else {
+            phase = .failure("Enter both the OAuth Client ID and secret, or leave both empty.")
+            return
+        }
+        var config = SyncConfig(projectID: project, apiKey: key, hostInviteCode: nil)
+        if !clientID.isEmpty {
+            config.googleClientID = clientID
+            config.googleClientSecret = clientSecret
+        }
+        await validateAndCommit(config)
     }
 
     func submitJoin() async {
@@ -73,9 +106,26 @@ final class SetupModel {
         case .failure(let error):
             phase = .failure(error.localizedDescription)
         case .success(let link):
-            await validateAndCommit(SyncConfig(
+            var config = SyncConfig(
                 projectID: link.projectID, apiKey: link.apiKey,
-                hostInviteCode: link.hostInviteCode))
+                hostInviteCode: link.hostInviteCode)
+            config.googleClientID = link.googleClientID
+            config.googleClientSecret = link.googleClientSecret
+            await validateAndCommit(config)
+        }
+    }
+
+    func signInWithGoogle() async {
+        guard !isSigningInWithGoogle else { return }
+        isSigningInWithGoogle = true
+        signInError = nil
+        defer { isSigningInWithGoogle = false }
+        do {
+            linkedEmail = try await actions.signInWithGoogle() ?? "Google account"
+        } catch GoogleSignInError.cancelled {
+            // Closed tab / denied consent / timeout — quiet by design.
+        } catch {
+            signInError = error.localizedDescription
         }
     }
 
