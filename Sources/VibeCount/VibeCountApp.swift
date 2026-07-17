@@ -226,7 +226,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
 
     private func makeSyncService(container: ModelContainer) -> any SyncService {
         if let config = FirebaseConfig.resolve(store: syncConfigStore, bundled: FirebaseConfig.load()) {
-            return FirestoreSyncService(container: container, backend: FirestoreClient(config: config))
+            // Pre-per-project builds kept one global session file; move it to
+            // this project's name once so the existing identity carries over.
+            AuthSessionStore.adoptLegacySession(for: config.projectID)
+            return FirestoreSyncService(
+                container: container,
+                backend: FirestoreClient(
+                    config: config,
+                    store: AuthSessionStore(projectID: config.projectID)))
         }
         logger.notice("No sync config (stored or bundled) — running local-only.")
         return LocalOnlySyncService(context: container.mainContext)
@@ -246,7 +253,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     /// Called by SetupModel only after ConfigValidator succeeded.
     func commitSyncConfig(_ config: SyncConfig, session: StoredAuthSession) async throws {
         guard let container else { throw SyncError.notConfigured }
-        let authStore = AuthSessionStore()
+        // Per-project session file: the old project's session stays on disk,
+        // so switching back later resumes that identity instead of minting a
+        // duplicate user.
+        let authStore = AuthSessionStore(projectID: config.projectID)
         // Save-then-purge: a failed save leaves the old identity + config
         // fully intact. A failed purge (after both saves succeed) leaves only
         // stale local friend rows, which refreshLeaderboard's removeAll-except
@@ -258,7 +268,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         syncService?.stopSyncing()
         let service = FirestoreSyncService(
             container: container,
-            backend: FirestoreClient(config: FirebaseConfig(config)))
+            backend: FirestoreClient(config: FirebaseConfig(config), store: authStore))
         syncService = service
         rebuildPopoverContent()
         await service.startSyncing()
@@ -286,7 +296,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             ownInviteCode: ownInviteCode,
             actions: SetupActions(
                 validate: { config, store in
-                    await ConfigValidator().validate(config, authStore: store)
+                    // Seed the scratch store with any session previously used
+                    // with this project: validation then refreshes that
+                    // identity (same uid) instead of signing up a duplicate.
+                    // A dead token still falls back to a fresh sign-up inside
+                    // FirestoreClient.
+                    if let previous = AuthSessionStore(projectID: config.projectID).load() {
+                        try? store.save(previous)
+                    }
+                    return await ConfigValidator().validate(config, authStore: store)
                 },
                 commit: { [weak self] config, session in
                     try await self?.commitSyncConfig(config, session: session)
