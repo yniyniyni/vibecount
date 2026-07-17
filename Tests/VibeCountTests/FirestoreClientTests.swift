@@ -316,4 +316,72 @@ final class FirestoreClientTests: XCTestCase {
         _ = try await client.signIn()
         XCTAssertEqual(store.load(), StoredAuthSession(uid: "uid-1", refreshToken: "r2", linkedEmail: "a@b.c"))
     }
+
+    private func stubSignedInThen(_ idp: @escaping @Sendable (URLRequest, Data) -> (Int, Data)) {
+        StubURLProtocol.handler = { request in
+            let url = request.url!.absoluteString
+            if url.contains("accounts:signUp") {
+                return (200, Self.json([
+                    "idToken": "anon-token", "refreshToken": "anon-refresh",
+                    "localId": "anon-uid", "expiresIn": "3600",
+                ]))
+            }
+            if url.contains("accounts:signInWithIdp") {
+                return idp(request, StubURLProtocol.body(of: request))
+            }
+            return (500, Data())
+        }
+    }
+
+    func testLinkGoogleAccountLinksOntoCurrentUid() async throws {
+        stubSignedInThen { request, body in
+            XCTAssertTrue(request.url!.absoluteString.hasPrefix(
+                "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=test-key"))
+            let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+            XCTAssertEqual(json["idToken"] as? String, "anon-token")
+            XCTAssertEqual(json["postBody"] as? String, "id_token=google-jwt&providerId=google.com")
+            XCTAssertEqual(json["requestUri"] as? String, "http://localhost")
+            return (200, Self.json([
+                "idToken": "linked-token", "refreshToken": "linked-refresh",
+                "localId": "anon-uid", "email": "a@b.c", "expiresIn": "3600",
+            ]))
+        }
+        _ = try await client.signIn()
+        let outcome = try await client.linkGoogleAccount(googleIDToken: "google-jwt")
+        XCTAssertEqual(outcome, .linked(email: "a@b.c"))
+        XCTAssertEqual(store.load(), StoredAuthSession(
+            uid: "anon-uid", refreshToken: "linked-refresh", linkedEmail: "a@b.c"))
+    }
+
+    func testAlreadyLinkedRecoversPreviousUid() async throws {
+        stubSignedInThen { _, body in
+            let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+            if json["idToken"] != nil {
+                // Link attempt → this Google account already belongs to uid-old.
+                return (400, Self.json(["error": ["message": "FEDERATED_USER_ID_ALREADY_LINKED"]]))
+            }
+            return (200, Self.json([
+                "idToken": "old-token", "refreshToken": "old-refresh",
+                "localId": "uid-old", "email": "a@b.c", "expiresIn": "3600",
+            ]))
+        }
+        _ = try await client.signIn()
+        let outcome = try await client.linkGoogleAccount(googleIDToken: "google-jwt")
+        XCTAssertEqual(outcome, .recovered(uid: "uid-old", email: "a@b.c"))
+        XCTAssertEqual(store.load(), StoredAuthSession(
+            uid: "uid-old", refreshToken: "old-refresh", linkedEmail: "a@b.c"))
+    }
+
+    func testOtherLinkErrorsSurface() async throws {
+        stubSignedInThen { _, _ in
+            (400, Self.json(["error": ["message": "EMAIL_EXISTS"]]))
+        }
+        _ = try await client.signIn()
+        do {
+            _ = try await client.linkGoogleAccount(googleIDToken: "google-jwt")
+            XCTFail("expected throw")
+        } catch FirestoreClientError.authFailed(let message) {
+            XCTAssertEqual(message, "EMAIL_EXISTS")
+        }
+    }
 }
