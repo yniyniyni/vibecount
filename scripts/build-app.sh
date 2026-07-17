@@ -37,13 +37,15 @@ for b in "$BIN_DIR"/*.bundle; do
 done
 
 # GoogleService-Info.plist → Contents/Resources so Bundle.main + configure() find it.
-PLIST_SRC="$ROOT/Sources/VibeCount/GoogleService-Info.plist"
+# The plist lives at the repo root (gitignored); it is deliberately NOT a SwiftPM
+# resource, so a fresh clone builds without missing-resource warnings.
+PLIST_SRC="$ROOT/GoogleService-Info.plist"
 if [[ -f "$PLIST_SRC" ]]; then
 	cp "$PLIST_SRC" "$APP/Contents/Resources/GoogleService-Info.plist"
 	echo "  • bundled GoogleService-Info.plist (live Firebase sync)"
 else
-	echo "  ⚠️  no Sources/VibeCount/GoogleService-Info.plist — the app will fall back"
-	echo "     to MockSyncService. Run scripts/setup-firebase.sh first for real sync."
+	echo "  ⚠️  no GoogleService-Info.plist at the repo root — the app will run in"
+	echo "     local-only mode. Run scripts/setup-firebase.sh first for real sync."
 fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -64,7 +66,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc sign so the bundle launches cleanly (best-effort).
+# Ad-hoc sign so the bundle launches cleanly (best-effort). REST sync needs no
+# entitlements, certificates, or provisioning profiles.
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "  (codesign skipped)"
 
 echo "✅ Built ${APP/#$ROOT\//}"
