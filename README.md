@@ -35,6 +35,10 @@ tracks only your own usage. To sync a leaderboard with friends, one person
   security rules to paste, validates the setup, and hands you a join link.
 - **Join:** click the `vibecount://join?…` link your host sent (or paste it
   into *Join a group*). The host is added as a friend automatically.
+- **Optional Google sign-in:** if the host completes wizard step 6 (their own
+  Desktop OAuth client), members can click *Sign in with Google* in Sync
+  Settings to link their identity — reinstalling or moving to a new Mac then
+  recovers the same stats, friends, and invite code by signing in again.
 
 A `GoogleService-Info.plist` bundled by `scripts/build-app.sh` still works as
 a fallback backend (`scripts/setup-firebase.sh` installs one), but the GUI
