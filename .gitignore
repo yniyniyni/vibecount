@@ -6,3 +6,5 @@ VibeCount.dmg
 GoogleService-Info.plist
 firestore-tests/node_modules/
 firestore-tests/firestore-debug.log
+
+.worktrees/
