@@ -27,6 +27,11 @@ struct JoinLink: Equatable {
     /// host just isn't auto-friended.
     let hostInviteCode: String?
 
+    /// Host-owned Google OAuth client for optional sign-in. Both-or-nothing:
+    /// a link carrying only one of gi/gs is treated as carrying neither.
+    var googleClientID: String? = nil
+    var googleClientSecret: String? = nil
+
     var url: URL {
         var components = URLComponents()
         components.scheme = "vibecount"
@@ -38,6 +43,10 @@ struct JoinLink: Equatable {
         ]
         if let hostInviteCode {
             items.append(URLQueryItem(name: "c", value: hostInviteCode))
+        }
+        if let googleClientID, let googleClientSecret {
+            items.append(URLQueryItem(name: "gi", value: googleClientID))
+            items.append(URLQueryItem(name: "gs", value: googleClientSecret))
         }
         components.queryItems = items
         return components.url!
@@ -66,8 +75,14 @@ struct JoinLink: Equatable {
               let apiKey = query["k"], !apiKey.isEmpty else {
             return .failure(.missingFields)
         }
-        return .success(JoinLink(
+        var link = JoinLink(
             projectID: projectID, apiKey: apiKey,
-            hostInviteCode: query["c"].flatMap(InviteCode.normalize)))
+            hostInviteCode: query["c"].flatMap(InviteCode.normalize))
+        if let gi = query["gi"], !gi.isEmpty,
+           let gs = query["gs"], !gs.isEmpty {
+            link.googleClientID = gi
+            link.googleClientSecret = gs
+        }
+        return .success(link)
     }
 }
