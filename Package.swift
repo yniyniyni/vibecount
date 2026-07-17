@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -7,23 +7,12 @@ let package = Package(
     products: [
         .executable(name: "VibeCount", targets: ["VibeCount"])
     ],
-    dependencies: [
-        .package(url: "https://github.com/firebase/firebase-ios-sdk.git", .upToNextMajor(from: "11.0.0"))
-    ],
     targets: [
-        .executableTarget(
-            name: "VibeCount",
-            dependencies: [
-                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk")
-            ],
-            exclude: ["GoogleService-Info.plist.example"],
-            resources: [
-                .process("GoogleService-Info.plist")
-            ],
-            swiftSettings: [
-                .enableUpcomingFeature("StrictConcurrency")
-            ]
-        ),
+        // GoogleService-Info.plist is intentionally NOT a SwiftPM resource: the
+        // app reads it from Bundle.main, which only exists in the .app bundle
+        // that scripts/build-app.sh assembles. The (gitignored) plist lives at
+        // the repository root so a fresh clone builds without warnings.
+        .executableTarget(name: "VibeCount"),
         .testTarget(name: "VibeCountTests", dependencies: ["VibeCount"])
     ]
 )
