@@ -15,7 +15,7 @@ struct VibeCountApp: App {
 }
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: (any SyncService)?
@@ -111,6 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc func manualRefresh() {
         pollUsage()
+    }
+
+    /// Titlebar close bypasses the SwiftUI dismiss action; release the
+    /// window and its model here so they don't linger until the next open.
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === setupWindow else { return }
+        setupWindow = nil
+        pendingSetupModel = nil
     }
 
     func popoverWillShow(_ notification: Notification) {
@@ -287,6 +295,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.title = "VibeCount Sync"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         setupWindow = window
         NSApp.activate(ignoringOtherApps: true)

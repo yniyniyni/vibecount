@@ -15,4 +15,16 @@ final class AppTests: XCTestCase {
         XCTAssertNotNil(delegate.syncConfigStore)
         XCTAssertTrue(delegate.responds(to: #selector(AppDelegate.openSyncSettings)))
     }
+
+    @MainActor
+    func testTitlebarCloseReleasesSetupWindow() {
+        let delegate = AppDelegate()
+        delegate.showSetupWindow(route: .welcome)
+        XCTAssertNotNil(delegate.setupWindow)
+
+        delegate.setupWindow?.close()
+
+        XCTAssertNil(delegate.setupWindow)
+        XCTAssertNil(delegate.pendingSetupModel)
+    }
 }
