@@ -31,11 +31,30 @@ struct StoredAuthSession: Codable, Equatable, Sendable {
 struct AuthSessionStore: Sendable {
     let fileURL: URL
 
-    init(directory: URL? = nil) {
+    /// With a `projectID`, the session file is per-project
+    /// (firebase-auth-<projectID>.json): leaving a project keeps its identity
+    /// on disk, so rejoining the same project later resumes the same uid
+    /// instead of minting a duplicate anonymous user. nil keeps the legacy
+    /// single-file name (pre-existing installs, tests).
+    init(directory: URL? = nil, projectID: String? = nil) {
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VibeCount", isDirectory: true)
-        fileURL = base.appendingPathComponent("firebase-auth.json")
+        let name = projectID.map { pid in
+            "firebase-auth-\(pid.filter { $0.isLetter || $0.isNumber || $0 == "-" }).json"
+        } ?? "firebase-auth.json"
+        fileURL = base.appendingPathComponent(name)
+    }
+
+    /// One-time move of the legacy single-session file to the per-project
+    /// name, so an existing install keeps its identity when this build first
+    /// runs. No-op when a per-project session already exists.
+    static func adoptLegacySession(for projectID: String, directory: URL? = nil) {
+        let legacy = AuthSessionStore(directory: directory)
+        let current = AuthSessionStore(directory: directory, projectID: projectID)
+        guard current.load() == nil, let session = legacy.load() else { return }
+        try? current.save(session)
+        legacy.clear()
     }
 
     func load() -> StoredAuthSession? {

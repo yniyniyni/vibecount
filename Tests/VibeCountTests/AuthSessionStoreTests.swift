@@ -59,4 +59,32 @@ final class AuthSessionStoreTests: XCTestCase {
         try Data("not json".utf8).write(to: directory.appendingPathComponent("firebase-auth.json"))
         XCTAssertNil(store.load())
     }
+
+    func testPerProjectStoresAreIsolated() throws {
+        let projectA = AuthSessionStore(directory: directory, projectID: "proj-a")
+        let projectB = AuthSessionStore(directory: directory, projectID: "proj-b")
+        try projectA.save(StoredAuthSession(uid: "ua", refreshToken: "ra"))
+        XCTAssertNil(projectB.load())
+        XCTAssertNil(store.load(), "legacy file must stay untouched")
+        XCTAssertEqual(projectA.fileURL.lastPathComponent, "firebase-auth-proj-a.json")
+        XCTAssertEqual(projectA.load(), StoredAuthSession(uid: "ua", refreshToken: "ra"))
+    }
+
+    func testProjectIDIsSanitizedForFileName() {
+        let odd = AuthSessionStore(directory: directory, projectID: "p/../x y")
+        XCTAssertEqual(odd.fileURL.lastPathComponent, "firebase-auth-pxy.json")
+    }
+
+    func testAdoptLegacySessionMovesFileOnce() throws {
+        try store.save(StoredAuthSession(uid: "u1", refreshToken: "r1"))
+        AuthSessionStore.adoptLegacySession(for: "proj-a", directory: directory)
+        let current = AuthSessionStore(directory: directory, projectID: "proj-a")
+        XCTAssertEqual(current.load(), StoredAuthSession(uid: "u1", refreshToken: "r1"))
+        XCTAssertNil(store.load(), "legacy file is consumed by the move")
+
+        // A later legacy file must not clobber an existing per-project session.
+        try store.save(StoredAuthSession(uid: "u2", refreshToken: "r2"))
+        AuthSessionStore.adoptLegacySession(for: "proj-a", directory: directory)
+        XCTAssertEqual(current.load()?.uid, "u1")
+    }
 }
