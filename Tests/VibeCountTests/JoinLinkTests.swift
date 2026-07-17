@@ -49,4 +49,32 @@ final class JoinLinkTests: XCTestCase {
         XCTAssertEqual(JoinLink.parse("vibecount://join?v=1&k=k"), .failure(.missingFields))
         XCTAssertEqual(JoinLink.parse("vibecount://join?v=1&p=&k=k"), .failure(.missingFields))
     }
+
+    func testGoogleParamsRoundTrip() throws {
+        var link = JoinLink(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        link.googleClientID = "cid.apps.googleusercontent.com"
+        link.googleClientSecret = "GOCSPX-abc"
+        let parsed = try JoinLink.parse(link.url.absoluteString).get()
+        XCTAssertEqual(parsed, link)
+    }
+
+    func testGoogleParamsOmittedWhenAbsent() throws {
+        let link = JoinLink(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        XCTAssertFalse(link.url.absoluteString.contains("gi="))
+        XCTAssertFalse(link.url.absoluteString.contains("gs="))
+    }
+
+    func testGoogleParamsAreBothOrNothing() throws {
+        let onlyID = try JoinLink.parse("vibecount://join?v=1&p=p&k=k&gi=cid").get()
+        XCTAssertNil(onlyID.googleClientID)
+        XCTAssertNil(onlyID.googleClientSecret)
+        let emptySecret = try JoinLink.parse("vibecount://join?v=1&p=p&k=k&gi=cid&gs=").get()
+        XCTAssertNil(emptySecret.googleClientID)
+    }
+
+    func testOldLinksStillParse() throws {
+        let parsed = try JoinLink.parse("vibecount://join?v=1&p=p&k=k&c=ABCD-EFGH-2345-6789").get()
+        XCTAssertNil(parsed.googleClientID)
+        XCTAssertEqual(parsed.projectID, "p")
+    }
 }
