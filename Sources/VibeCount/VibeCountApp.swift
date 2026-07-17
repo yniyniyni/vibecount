@@ -19,6 +19,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: (any SyncService)?
+    let syncConfigStore = SyncConfigStore()
+    var setupWindow: NSWindow?
     var usageMonitor: UsageMonitor = ClaudeUsageMonitor()
     var updateTimer: Timer?
     var popover: NSPopover!
@@ -49,27 +51,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
-        // Sync config rides in GoogleService-Info.plist, which only the .app
-        // bundle built by scripts/build-app.sh provides. Without it, run
-        // local-only — real data for the local user, never fabricated friends.
-        let service: any SyncService
-        if let config = FirebaseConfig.load() {
-            service = FirestoreSyncService(
-                container: container, backend: FirestoreClient(config: config))
-        } else {
-            logger.notice("No GoogleService-Info.plist in Bundle.main — running local-only.")
-            service = LocalOnlySyncService(context: container.mainContext)
-        }
-        syncService = service
+        // Sync config: user-entered (Application Support) beats a bundled
+        // GoogleService-Info.plist; with neither, run local-only.
+        syncService = makeSyncService(container: container)
 
-        // Setup Popover
-        let dashboard = DashboardView()
-            .modelContainer(container)
-            .environment(service.status)
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: dashboard)
+        rebuildPopoverContent()
         popover.delegate = self
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -105,6 +94,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task { @MainActor [weak self] in
             await self?.syncService?.startSyncing()
             self?.pollUsage()
+        }
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(openSyncSettings),
+            name: NSNotification.Name("OpenSyncSettings"), object: nil)
+
+        // First run with no backend at all: offer setup once. Skipping is
+        // remembered; the popover's "Sync Settings…" reopens it anytime.
+        if FirebaseConfig.resolve(store: syncConfigStore, bundled: FirebaseConfig.load()) == nil,
+           !UserDefaults.standard.bool(forKey: "didOfferSetup") {
+            UserDefaults.standard.set(true, forKey: "didOfferSetup")
+            showSetupWindow(route: .welcome)
         }
     }
 
@@ -211,5 +212,101 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         alert.informativeText = error.localizedDescription
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    // MARK: - Sync backend management
+
+    private func makeSyncService(container: ModelContainer) -> any SyncService {
+        if let config = FirebaseConfig.resolve(store: syncConfigStore, bundled: FirebaseConfig.load()) {
+            return FirestoreSyncService(container: container, backend: FirestoreClient(config: config))
+        }
+        logger.notice("No sync config (stored or bundled) — running local-only.")
+        return LocalOnlySyncService(context: container.mainContext)
+    }
+
+    /// The popover binds a specific service's status at construction, so a
+    /// backend swap rebuilds its content view.
+    private func rebuildPopoverContent() {
+        guard let container, let syncService else { return }
+        let dashboard = DashboardView()
+            .modelContainer(container)
+            .environment(syncService.status)
+        popover.contentViewController = NSHostingController(rootView: dashboard)
+    }
+
+    /// Adopts a validated identity + config and live-swaps the sync service.
+    /// Called by SetupModel only after ConfigValidator succeeded.
+    func commitSyncConfig(_ config: SyncConfig, session: StoredAuthSession) async throws {
+        guard let container else { throw SyncError.notConfigured }
+        let authStore = AuthSessionStore()
+        try BackendSwitcher.prepareForNewBackend(context: container.mainContext, authStore: authStore)
+        try authStore.save(session)
+        try syncConfigStore.save(config)
+
+        syncService?.stopSyncing()
+        let service = FirestoreSyncService(
+            container: container,
+            backend: FirestoreClient(config: FirebaseConfig(config)))
+        syncService = service
+        rebuildPopoverContent()
+        await service.startSyncing()
+        // Auto-friend the host so a joiner's leaderboard is never empty.
+        // Best-effort: a failure here still leaves a working backend.
+        if let hostCode = config.hostInviteCode {
+            try? await service.addFriend(inviteCode: hostCode)
+        }
+        pollUsage()
+    }
+
+    // MARK: - Setup window
+
+    @objc func openSyncSettings() {
+        showSetupWindow(route: syncConfigStore.load() == nil ? .welcome : .settings)
+    }
+
+    func showSetupWindow(route: SetupModel.Route) {
+        setupWindow?.close()
+        let ownInviteCode = try? container?.mainContext
+            .fetch(FetchDescriptor<User>()).first?.inviteCode
+        let model = SetupModel(
+            route: route,
+            currentConfig: syncConfigStore.load(),
+            ownInviteCode: ownInviteCode,
+            actions: SetupActions(
+                validate: { config, store in
+                    await ConfigValidator().validate(config, authStore: store)
+                },
+                commit: { [weak self] config, session in
+                    try await self?.commitSyncConfig(config, session: session)
+                },
+                dismiss: { [weak self] in
+                    self?.setupWindow?.close()
+                    self?.setupWindow = nil
+                }))
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SetupView(model: model)))
+        window.title = "VibeCount Sync"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        setupWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        pendingSetupModel = model
+    }
+
+    /// Kept so the deep-link handler can prefill an already-open window.
+    var pendingSetupModel: SetupModel?
+
+    // MARK: - Deep links
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first else { return }
+        switch JoinLink.parse(url: url) {
+        case .failure(let error):
+            presentError(title: "Couldn't Open Join Link", error: error)
+        case .success(let link):
+            showSetupWindow(route: .join)
+            pendingSetupModel?.prefill(joinLink: link)
+        }
     }
 }
