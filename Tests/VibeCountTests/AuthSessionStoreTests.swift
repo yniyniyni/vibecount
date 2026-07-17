@@ -32,6 +32,12 @@ final class AuthSessionStoreTests: XCTestCase {
         let path = directory.appendingPathComponent("firebase-auth.json").path
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
+
+        // Verify the replace-existing path also preserves 0600 permissions
+        try store.save(StoredAuthSession(uid: "abc", refreshToken: "r2"))
+        let attrs2 = try FileManager.default.attributesOfItem(atPath: path)
+        XCTAssertEqual((attrs2[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
+        XCTAssertEqual(store.load()?.refreshToken, "r2")
     }
 
     func testClearRemovesFile() throws {
