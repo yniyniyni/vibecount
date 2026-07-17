@@ -109,6 +109,27 @@ public struct DashboardView: View {
                 }
 
                 Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenSyncSettings"), object: nil)
+                }) {
+                    HStack {
+                        Image(systemName: "gearshape")
+                        Text("Sync Settings…")
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .onHover { isHovered in
+                    if isHovered {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+
+                Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("AddFriend"), object: nil)
                 }) {
                     HStack {
