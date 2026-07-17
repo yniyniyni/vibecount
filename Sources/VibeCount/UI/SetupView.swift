@@ -82,6 +82,21 @@ struct SetupView: View {
                     Link("Open project settings",
                          destination: ConsoleURL.url("settings/general", projectID: model.projectID))
                 }
+                VStack(alignment: .leading, spacing: 6) {
+                    stepHeader(6, "Enable Google sign-in (optional)")
+                    Text("Lets members protect their identity with their Google account (survives reinstalls). Authentication → Sign-in method → enable Google. Then in Google Cloud Credentials: set the consent screen name, publish it, create an OAuth client of type \"Desktop app\", and paste its ID and secret. Skip to keep anonymous-only.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField("OAuth Client ID (…apps.googleusercontent.com)", text: $model.googleClientIDField)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("OAuth Client secret (GOCSPX-…)", text: $model.googleClientSecretField)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Link("Open Authentication providers",
+                             destination: ConsoleURL.url("authentication/providers", projectID: model.projectID))
+                        Link("Open Cloud Credentials",
+                             destination: cloudCredentialsURL)
+                    }
+                }
                 phaseFooter(submitTitle: "Validate & Finish") { await model.submitHost() }
                 backLink
             }
@@ -115,6 +130,7 @@ struct SetupView: View {
                         .foregroundStyle(.secondary)
                     shareLinkRow(shareLink)
                 }
+                googleRow
                 Divider()
                 Button("Switch to a different group…") { model.route = .welcome }
             } else {
@@ -167,6 +183,7 @@ struct SetupView: View {
                     LabeledContent("Your invite code", value: InviteCode.display(ownInviteCode))
                         .font(.caption)
                 }
+                googleRow
                 Button("Done") { model.actions.dismiss() }.buttonStyle(.borderedProminent)
             }
         case .validating:
@@ -209,5 +226,40 @@ struct SetupView: View {
 
     private var backLink: some View {
         Button("Back") { model.route = .welcome; model.phase = .idle }.buttonStyle(.link)
+    }
+
+    private var cloudCredentialsURL: URL {
+        let trimmed = model.projectID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = trimmed.isEmpty ? "" : "?project=\(trimmed)"
+        return URL(string: "https://console.cloud.google.com/apis/credentials\(suffix)")!
+    }
+
+    /// Google sign-in status/button, shown in settings and on the success
+    /// footer. Hidden entirely when the group has no OAuth client pair.
+    @ViewBuilder
+    private var googleRow: some View {
+        if let email = model.linkedEmail {
+            Label("\(email) — identity protected", systemImage: "checkmark.seal.fill")
+                .font(.caption).foregroundStyle(.green)
+        } else if model.googleSignInAvailable {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    Task { await model.signInWithGoogle() }
+                } label: {
+                    if model.isSigningInWithGoogle {
+                        HStack { ProgressView().controlSize(.small); Text("Waiting for Google…") }
+                    } else {
+                        Label("Sign in with Google", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                }
+                .disabled(model.isSigningInWithGoogle)
+                Text("Protects your identity: reinstalling or moving to a new Mac keeps your stats and friends.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let signInError = model.signInError {
+                    Label(signInError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
     }
 }

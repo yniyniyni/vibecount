@@ -29,4 +29,20 @@ final class SetupViewTests: XCTestCase {
             ConsoleURL.url("authentication/providers", projectID: "  ").absoluteString,
             "https://console.firebase.google.com/project/_/authentication/providers")
     }
+
+    func testConstructsWithGoogleConfiguredModel() {
+        var config = SyncConfig(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        config.googleClientID = "cid"
+        config.googleClientSecret = "sec"
+        let model = SetupModel(
+            route: .settings, currentConfig: config, ownInviteCode: nil,
+            linkedEmail: "a@b.c",
+            actions: SetupActions(
+                validate: { _, _ in .success("uid") },
+                commit: { _, _ in },
+                fetchOwnInviteCode: { nil },
+                signInWithGoogle: { nil },
+                dismiss: {}))
+        XCTAssertNotNil(SetupView(model: model).body)
+    }
 }
