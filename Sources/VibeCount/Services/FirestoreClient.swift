@@ -137,4 +137,111 @@ actor FirestoreClient {
         }
         return json
     }
+
+    // MARK: - Documents
+
+    private var documentsBase: String {
+        "https://firestore.googleapis.com/v1/projects/\(config.projectID)/databases/(default)/documents"
+    }
+
+    private func resourceName(_ path: String) -> String {
+        "projects/\(config.projectID)/databases/(default)/documents/\(path)"
+    }
+
+    /// nil on 404 — "no such document" is an expected answer, not an error.
+    func getDocument(path: String) async throws -> FirestoreDocument? {
+        let (status, data) = try await send("GET", url: URL(string: "\(documentsBase)/\(path)")!)
+        if status == 404 { return nil }
+        try Self.checkStatus(status, data: data)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return FirestoreDocument(json: json)
+    }
+
+    /// Upsert: PATCH creates the document when absent and replaces all fields
+    /// when present (we always send the complete field set).
+    func patchDocument(path: String, fields: [String: FirestoreValue]) async throws {
+        let (status, data) = try await send(
+            "PATCH", url: URL(string: "\(documentsBase)/\(path)")!,
+            body: FirestoreDocument.encodeFields(fields))
+        try Self.checkStatus(status, data: data)
+    }
+
+    /// Create-only: throws `.alreadyExists` when the document is present,
+    /// which is how the rules' create-only collections signal a lost race.
+    func createDocument(parent: String, documentID: String,
+                        fields: [String: FirestoreValue]) async throws {
+        var components = URLComponents(string: "\(documentsBase)/\(parent)")!
+        components.queryItems = [URLQueryItem(name: "documentId", value: documentID)]
+        let (status, data) = try await send(
+            "POST", url: components.url!, body: FirestoreDocument.encodeFields(fields))
+        try Self.checkStatus(status, data: data)
+    }
+
+    func deleteDocument(path: String) async throws {
+        let (status, data) = try await send("DELETE", url: URL(string: "\(documentsBase)/\(path)")!)
+        try Self.checkStatus(status, data: data)
+    }
+
+    /// One page is plenty at friends scale; deliberately no pagination.
+    func listDocuments(path: String) async throws -> [FirestoreDocument] {
+        var components = URLComponents(string: "\(documentsBase)/\(path)")!
+        components.queryItems = [URLQueryItem(name: "pageSize", value: "300")]
+        let (status, data) = try await send("GET", url: components.url!)
+        try Self.checkStatus(status, data: data)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let documents = json["documents"] as? [[String: Any]] ?? []
+        return documents.compactMap(FirestoreDocument.init(json:))
+    }
+
+    /// Point-reads many documents in one round trip. Result is keyed by the
+    /// relative path passed in; a nil value means the document doesn't exist.
+    func batchGet(paths: [String]) async throws -> [String: FirestoreDocument?] {
+        let (status, data) = try await send(
+            "POST", url: URL(string: "\(documentsBase):batchGet")!,
+            body: ["documents": paths.map(resourceName)])
+        try Self.checkStatus(status, data: data)
+        let entries = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        let prefix = resourceName("")
+        var result: [String: FirestoreDocument?] = [:]
+        for entry in entries {
+            if let found = entry["found"] as? [String: Any],
+               let document = FirestoreDocument(json: found) {
+                result[String(document.name.dropFirst(prefix.count))] = document
+            } else if let missing = entry["missing"] as? String {
+                result[String(missing.dropFirst(prefix.count))] = .some(nil)
+            }
+        }
+        return result
+    }
+
+    /// Authenticated request with a single refresh-and-retry on 401.
+    private func send(_ method: String, url: URL, body: [String: Any]? = nil,
+                      isRetry: Bool = false) async throws -> (Int, Data) {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401, !isRetry {
+            invalidateToken()
+            return try await send(method, url: url, body: body, isRetry: true)
+        }
+        return (status, data)
+    }
+
+    private static func checkStatus(_ status: Int, data: Data) throws {
+        guard !(200..<300).contains(status) else { return }
+        switch status {
+        case 403: throw FirestoreClientError.permissionDenied
+        case 409: throw FirestoreClientError.alreadyExists
+        default:
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let message = ((json?["error"] as? [String: Any])?["message"] as? String) ?? "unexpected response"
+            throw FirestoreClientError.http(status, message)
+        }
+    }
 }
