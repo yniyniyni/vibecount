@@ -3,57 +3,87 @@ import SwiftUI
 import SwiftData
 
 public struct DashboardView: View {
-    @Query(sort: \Friend.latestDailyTokens, order: .reverse) var friends: [Friend]
-    @State private var selectedTab = 0
-    
+    @Query var friends: [Friend]
     @Query var users: [User]
-    
+    @State private var selectedTab: LeaderboardTab = .today
+    // Optional so the view also renders (e.g. in tests) without a status in
+    // the environment.
+    @Environment(SyncStatus.self) private var syncStatus: SyncStatus?
+
     public init() {}
 
     public var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $selectedTab) {
-                Text("Today").tag(0)
-                Text("Monthly").tag(1)
+                ForEach(LeaderboardTab.allCases, id: \.self) { tab in
+                    Text(tab.title).tag(tab)
+                }
             }
             .pickerStyle(.segmented)
             .padding()
-            
+
             Divider()
-            
-            List(friends) { friend in
+
+            // Each tab sorts by the figure it displays.
+            List(selectedTab.sorted(friends)) { friend in
+                let isMe = friend.friendId == users.first?.userId
                 HStack {
-                    let isMe = friend.friendId == users.first?.userId
-                    
                     Text(friend.displayName)
                         .fontWeight(isMe ? .bold : .regular)
-                    
+
                     if isMe {
                         Text("(You)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    
+
                     Spacer()
-                    
-                    // Use actual monthly tokens when selected
-                    let displayTokens = selectedTab == 0 ? friend.latestDailyTokens : friend.latestMonthlyTokens
-                    
-                    Text(displayTokens.formattedTokenCount)
+
+                    Text(selectedTab.tokens(for: friend).formattedTokenCount)
                         .fontWeight(.bold)
                         .fontDesign(.monospaced)
                 }
                 .padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .contextMenu {
+                    if !isMe {
+                        Button("Remove Friend", role: .destructive) {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("RemoveFriend"),
+                                object: nil,
+                                userInfo: ["friendId": friend.friendId]
+                            )
+                        }
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
-            
+
             Divider()
-            
-            if let user = users.first {
+
+            if let message = syncStatus?.lastError {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+            } else if syncStatus?.mode == .localOnly {
+                Label("Local-only mode — Firebase sync not configured", systemImage: "wifi.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+            }
+
+            // The invite pill only makes sense when there is a server that can
+            // resolve the code.
+            if let user = users.first, syncStatus?.mode != .localOnly, !user.inviteCode.isEmpty {
                 InviteCodeButton(inviteCode: user.inviteCode)
                     .padding(.top, 8)
             }
-            
+
             VStack(spacing: 4) {
                 Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("RefreshData"), object: nil)
@@ -77,7 +107,7 @@ public struct DashboardView: View {
                         NSCursor.pop()
                     }
                 }
-                
+
                 Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("AddFriend"), object: nil)
                 }) {
@@ -100,7 +130,7 @@ public struct DashboardView: View {
                         NSCursor.pop()
                     }
                 }
-                
+
                 Button(action: {
                     NSApplication.shared.terminate(nil)
                 }) {

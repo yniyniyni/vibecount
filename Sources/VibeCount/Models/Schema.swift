@@ -15,6 +15,16 @@ public final class User {
     }
 }
 
+extension User {
+    /// Display name safe for upload: trimmed, 1–50 characters, never empty.
+    /// Mirrors the `displayName` constraints enforced by firestore.rules.
+    static func sanitizedDisplayName(_ raw: String = NSFullUserName()) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clamped = String(trimmed.prefix(50))
+        return clamped.isEmpty ? "Anonymous" : clamped
+    }
+}
+
 @Model
 public final class Friend {
     @Attribute(.unique) public var friendId: String

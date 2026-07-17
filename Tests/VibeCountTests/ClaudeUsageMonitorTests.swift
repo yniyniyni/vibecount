@@ -153,6 +153,27 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 200)
     }
 
+    func testPreCancelledFetchThrowsCancellation() async throws {
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 100)
+        ])
+        let monitor = ClaudeUsageMonitor(projectsURL: projectsDir)
+
+        let task = Task { () -> DailyMonthlyUsage in
+            // Deterministic: don't start scanning until cancellation has landed.
+            while !Task.isCancelled { await Task.yield() }
+            return try await monitor.fetchUsage()
+        }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+            // expected: the scan honors cancellation instead of running on
+        }
+    }
+
     func testMissingDirectoryReturnsZero() async throws {
         let monitor = ClaudeUsageMonitor(projectsURL: projectsDir.appendingPathComponent("does-not-exist"))
         let usage = try await monitor.fetchUsage()

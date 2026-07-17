@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# setup-firebase.sh — drop a real GoogleService-Info.plist into Sources/VibeCount/
-# so the app builds with live Firebase (Firestore) sync. Without it the app still
-# builds and runs, but falls back to MockSyncService (no cross-device leaderboard).
+# setup-firebase.sh — drop a real GoogleService-Info.plist into the repo root so
+# scripts/build-app.sh can embed it and the app runs with live Firebase
+# (Auth + Firestore) sync. Without it the app still builds and runs, but in
+# local-only mode (own usage only, no friends).
 #
 # Usage:
 #   scripts/setup-firebase.sh [path/to/GoogleService-Info.plist]
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$ROOT/Sources/VibeCount/GoogleService-Info.plist"
+DEST="$ROOT/GoogleService-Info.plist"
 TEMPLATE="$DEST.example"
 EXPECTED_PROJECT="vibe-count-app-0703"
 INSTALLED_APP="/Applications/VibeCount.app/Contents/Resources/GoogleService-Info.plist"
@@ -96,5 +97,5 @@ echo
 echo "Now build the .app bundle to pick up live Firebase sync:"
 echo "  scripts/build-app.sh && open build/VibeCount.app"
 echo
-echo "(swift run does NOT sync: its plist lands in Bundle.module, but the app"
-echo " looks in Bundle.main — only the .app bundle puts it where it's found.)"
+echo "(swift run does NOT sync: the app reads the plist from Bundle.main, and"
+echo " only the .app bundle built by scripts/build-app.sh embeds it there.)"

@@ -13,7 +13,14 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         self.projectsURL = projectsURL
     }
 
+    /// Scans the JSONL session logs for today's and the trailing-30-days token
+    /// totals. As a nonisolated async function this runs on the concurrency
+    /// pool — never the main actor — and it cooperates with the pool by
+    /// checking cancellation and yielding between files. Files are streamed
+    /// line-by-line rather than loaded whole (session logs can be tens of MB).
     public func fetchUsage() async throws -> DailyMonthlyUsage {
+        try Task.checkCancellation()
+
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: Date())
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
@@ -24,88 +31,182 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
 
-        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
-        guard let enumerator = FileManager.default.enumerator(
-            at: projectsURL,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
-        }
-
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         var totalDaily = 0
         var totalMonthly = 0
 
-        // Single enumeration computes both totals. Monthly covers the trailing
+        // Single pass computes both totals. Monthly covers the trailing
         // 30 days; today's rows are a subset of it, so each line is classified
         // once instead of walking the whole tree twice.
-        for case let url as URL in enumerator {
-            guard url.pathExtension.lowercased() == "jsonl" else { continue }
+        for url in collectRecentJSONLFiles(cutoff: startOf30Days) {
+            try Task.checkCancellation()
+            await Task.yield()
 
-            // A file last written before the 30-day window can't hold any in-window
-            // rows (every row's timestamp is <= the file's last write), so skip it
-            // without reading. Keeps the hot path proportional to recent activity
-            // instead of total history.
-            if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-               modified < startOf30Days {
-                continue
-            }
-
-            guard let fileContent = try? String(contentsOf: url, encoding: .utf8) else { continue }
-
-            // De-duplicate assistant rows per file by "<messageId>:<requestId>" so
-            // streamed/retried turns aren't double-counted. Daily and monthly keep
-            // separate maps because a row can qualify for monthly but not today.
-            var dailyKeyed: [String: Int] = [:]
-            var dailyUnkeyed = 0
-            var monthlyKeyed: [String: Int] = [:]
-            var monthlyUnkeyed = 0
-
-            for line in fileContent.components(separatedBy: .newlines) {
-                guard !line.isEmpty, line.contains("\"type\":\"assistant\""), line.contains("\"usage\"") else { continue }
-
-                autoreleasepool {
-                    guard let data = line.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                          let type = json["type"] as? String, type == "assistant",
-                          let timestampStr = json["timestamp"] as? String,
-                          let date = isoFormatter.date(from: timestampStr) else { return }
-
-                    // Outside the monthly window → irrelevant to both totals.
-                    guard date >= startOf30Days else { return }
-
-                    guard let message = json["message"] as? [String: Any],
-                          let usage = message["usage"] as? [String: Any] else { return }
-
-                    let input = (usage["input_tokens"] as? Int) ?? 0
-                    let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
-                    let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
-                    let output = (usage["output_tokens"] as? Int) ?? 0
-
-                    let lineTokens = input + cacheCreate + cacheRead + output
-                    if lineTokens == 0 { return }
-
-                    let isToday = date >= startOfToday
-                    let messageId = message["id"] as? String
-                    let requestId = json["requestId"] as? String
-
-                    if let messageId = messageId, let requestId = requestId {
-                        let key = "\(messageId):\(requestId)"
-                        monthlyKeyed[key] = lineTokens
-                        if isToday { dailyKeyed[key] = lineTokens }
-                    } else {
-                        monthlyUnkeyed += lineTokens
-                        if isToday { dailyUnkeyed += lineTokens }
-                    }
-                }
-            }
-
-            totalDaily += dailyKeyed.values.reduce(0, +) + dailyUnkeyed
-            totalMonthly += monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed
+            let (daily, monthly) = try scanFile(
+                at: url,
+                startOfToday: startOfToday,
+                startOf30Days: startOf30Days,
+                isoFormatter: isoFormatter
+            )
+            totalDaily += daily
+            totalMonthly += monthly
         }
 
         return DailyMonthlyUsage(daily: totalDaily, monthly: totalMonthly)
+    }
+
+    /// Synchronous directory walk — `DirectoryEnumerator` iteration is marked
+    /// `noasync`, so it lives outside the async context and just returns the
+    /// candidate files.
+    private func collectRecentJSONLFiles(cutoff: Date) -> [URL] {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: projectsURL,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]) else {
+            return []
+        }
+
+        var files: [URL] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "jsonl" else { continue }
+
+            // A file last written before the 30-day window can't hold any
+            // in-window rows (every row's timestamp is <= the file's last
+            // write), so skip it without reading. Keeps the hot path
+            // proportional to recent activity instead of total history. If the
+            // attribute can't be read, keep the file and parse it anyway.
+            if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               modified < cutoff {
+                continue
+            }
+            files.append(url)
+        }
+        return files
+    }
+
+    private func scanFile(
+        at url: URL,
+        startOfToday: Date,
+        startOf30Days: Date,
+        isoFormatter: ISO8601DateFormatter
+    ) throws -> (daily: Int, monthly: Int) {
+        let reader: LineReader
+        do {
+            reader = try LineReader(url: url)
+        } catch {
+            // Session files can vanish or be locked mid-scan; skip this file
+            // rather than failing the whole poll (same semantics the previous
+            // whole-file read had for unreadable files).
+            return (0, 0)
+        }
+
+        // De-duplicate assistant rows per file by "<messageId>:<requestId>" so
+        // streamed/retried turns aren't double-counted. Daily and monthly keep
+        // separate maps because a row can qualify for monthly but not today.
+        var dailyKeyed: [String: Int] = [:]
+        var dailyUnkeyed = 0
+        var monthlyKeyed: [String: Int] = [:]
+        var monthlyUnkeyed = 0
+        var linesSinceCancellationCheck = 0
+
+        while true {
+            linesSinceCancellationCheck += 1
+            if linesSinceCancellationCheck >= 1024 {
+                linesSinceCancellationCheck = 0
+                try Task.checkCancellation()
+            }
+
+            let line: String?
+            do {
+                line = try reader.nextLine()
+            } catch {
+                break // unreadable remainder: keep what was already parsed
+            }
+            guard let line else { break }
+            guard !line.isEmpty, line.contains("\"type\":\"assistant\""), line.contains("\"usage\"") else { continue }
+
+            autoreleasepool {
+                guard let data = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                      let type = json["type"] as? String, type == "assistant",
+                      let timestampStr = json["timestamp"] as? String,
+                      let date = isoFormatter.date(from: timestampStr) else { return }
+
+                // Outside the monthly window → irrelevant to both totals.
+                guard date >= startOf30Days else { return }
+
+                guard let message = json["message"] as? [String: Any],
+                      let usage = message["usage"] as? [String: Any] else { return }
+
+                let input = (usage["input_tokens"] as? Int) ?? 0
+                let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+                let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
+                let output = (usage["output_tokens"] as? Int) ?? 0
+
+                let lineTokens = input + cacheCreate + cacheRead + output
+                if lineTokens == 0 { return }
+
+                let isToday = date >= startOfToday
+                let messageId = message["id"] as? String
+                let requestId = json["requestId"] as? String
+
+                if let messageId = messageId, let requestId = requestId {
+                    let key = "\(messageId):\(requestId)"
+                    monthlyKeyed[key] = lineTokens
+                    if isToday { dailyKeyed[key] = lineTokens }
+                } else {
+                    monthlyUnkeyed += lineTokens
+                    if isToday { dailyUnkeyed += lineTokens }
+                }
+            }
+        }
+
+        let daily = dailyKeyed.values.reduce(0, +) + dailyUnkeyed
+        let monthly = monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed
+        return (daily, monthly)
+    }
+}
+
+/// Streams `\n`-separated UTF-8 lines from a file via chunked reads, so a
+/// multi-megabyte session log is never held in memory at once.
+private final class LineReader {
+    private let handle: FileHandle
+    private var buffer = Data()
+    private var atEOF = false
+    private let chunkSize: Int
+
+    init(url: URL, chunkSize: Int = 64 * 1024) throws {
+        self.handle = try FileHandle(forReadingFrom: url)
+        self.chunkSize = chunkSize
+    }
+
+    deinit {
+        // A failed close on a read-only handle is inconsequential.
+        try? handle.close()
+    }
+
+    /// The next line without its trailing newline, or nil at end of file.
+    func nextLine() throws -> String? {
+        while true {
+            if let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
+                buffer.removeSubrange(buffer.startIndex...newlineIndex)
+                return String(decoding: lineData, as: UTF8.self)
+            }
+            if atEOF {
+                guard !buffer.isEmpty else { return nil }
+                let lineData = buffer
+                buffer = Data()
+                return String(decoding: lineData, as: UTF8.self)
+            }
+            if let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty {
+                buffer.append(chunk)
+            } else {
+                atEOF = true
+            }
+        }
     }
 }
