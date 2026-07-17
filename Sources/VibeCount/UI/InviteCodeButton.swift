@@ -39,7 +39,9 @@ struct InviteCodeButton: View {
                 }
                 .font(.caption)
 
-                Text(inviteCode)
+                // Shown grouped for readability; the copy still writes the
+                // canonical (ungrouped) code, and add-friend input accepts both.
+                Text(InviteCode.display(inviteCode))
                     .font(.caption)
                     .fontDesign(.monospaced)
                     .fontWeight(.bold)
