@@ -73,7 +73,7 @@ struct SetupView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     stepHeader(5, "Paste the project's identifiers")
-                    Text("Project settings (gear icon) → General: copy Project ID and Web API Key.")
+                    Text("Project ID: Project settings (gear icon) → General. API key: register an app under Your apps on that same page (a Web app </> is fastest — no download) and copy the apiKey from its config snippet.")
                         .font(.caption).foregroundStyle(.secondary)
                     TextField("Project ID (e.g. my-vibes-1a2b3)", text: $model.projectID)
                         .textFieldStyle(.roundedBorder)
