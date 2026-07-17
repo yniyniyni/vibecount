@@ -145,4 +145,151 @@ final class FirestoreClientTests: XCTestCase {
         XCTAssertEqual(store.load(), StoredAuthSession(uid: "uid-1", refreshToken: "refresh-1"),
                        "identity must survive a transient server failure")
     }
+
+    /// Stub that answers auth with a fixed token and delegates Firestore
+    /// requests to `firestoreHandler`.
+    private func stubAuthAndFirestore(
+        _ firestoreHandler: @escaping @Sendable (URLRequest) -> (Int, Data)
+    ) {
+        StubURLProtocol.handler = { request in
+            if request.url!.host!.contains("identitytoolkit") {
+                return (200, Self.json([
+                    "idToken": "token-1", "refreshToken": "refresh-1",
+                    "localId": "uid-1", "expiresIn": "3600",
+                ]))
+            }
+            return firestoreHandler(request)
+        }
+    }
+
+    private static let docsBase =
+        "https://firestore.googleapis.com/v1/projects/test-project/databases/(default)/documents"
+
+    func testGetDocumentReturnsNilOn404AndDocOn200() async throws {
+        stubAuthAndFirestore { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-1")
+            if request.url!.absoluteString == "\(Self.docsBase)/users/missing" {
+                return (404, Self.json(["error": ["message": "not found", "status": "NOT_FOUND"]]))
+            }
+            return (200, Self.json([
+                "name": "projects/test-project/databases/(default)/documents/users/abc",
+                "fields": ["displayName": ["stringValue": "Ilya"]],
+            ]))
+        }
+        let missing = try await client.getDocument(path: "users/missing")
+        XCTAssertNil(missing)
+        let found = try await client.getDocument(path: "users/abc")
+        XCTAssertEqual(found?.fields["displayName"], .string("Ilya"))
+    }
+
+    func testPatchDocumentSendsTypedFields() async throws {
+        stubAuthAndFirestore { request in
+            XCTAssertEqual(request.httpMethod, "PATCH")
+            let body = try! JSONSerialization.jsonObject(
+                with: StubURLProtocol.body(of: request)) as! [String: Any]
+            let fields = body["fields"] as! [String: [String: Any]]
+            XCTAssertEqual(fields["latestDailyTokens"]?["integerValue"] as? String, "5")
+            return (200, Self.json(["name": "projects/p/databases/(default)/documents/users/abc"]))
+        }
+        try await client.patchDocument(
+            path: "users/abc",
+            fields: ["latestDailyTokens": .integer(5)])
+    }
+
+    func testCreateDocumentMapsConflictToAlreadyExists() async throws {
+        stubAuthAndFirestore { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertTrue(request.url!.absoluteString.contains("documentId=CODE1"))
+            return (409, Self.json(["error": ["message": "exists", "status": "ALREADY_EXISTS"]]))
+        }
+        do {
+            try await client.createDocument(
+                parent: "inviteCodes", documentID: "CODE1",
+                fields: ["uid": .string("uid-1")])
+            XCTFail("expected alreadyExists")
+        } catch let error as FirestoreClientError {
+            XCTAssertEqual(error, .alreadyExists)
+        }
+    }
+
+    func testPermissionDeniedMapsDistinctly() async throws {
+        stubAuthAndFirestore { _ in
+            (403, Self.json(["error": ["message": "denied", "status": "PERMISSION_DENIED"]]))
+        }
+        do {
+            _ = try await client.getDocument(path: "users/other")
+            XCTFail("expected permissionDenied")
+        } catch let error as FirestoreClientError {
+            XCTAssertEqual(error, .permissionDenied)
+        }
+    }
+
+    func testListDocumentsParsesEmptyAndNonEmpty() async throws {
+        stubAuthAndFirestore { request in
+            if request.url!.absoluteString.contains("empty") {
+                return (200, Self.json([:]))  // Firestore omits "documents" when none
+            }
+            return (200, Self.json(["documents": [
+                ["name": "projects/p/databases/(default)/documents/users/me/friends/f1",
+                 "fields": ["inviteCode": ["stringValue": "C"]]],
+            ]]))
+        }
+        let empty = try await client.listDocuments(path: "users/empty/friends")
+        XCTAssertEqual(empty, [])
+        let one = try await client.listDocuments(path: "users/me/friends")
+        XCTAssertEqual(one.map(\.documentID), ["f1"])
+    }
+
+    func testBatchGetKeysByRelativePathWithNilForMissing() async throws {
+        stubAuthAndFirestore { request in
+            XCTAssertTrue(request.url!.absoluteString.hasSuffix("documents:batchGet"))
+            let body = try! JSONSerialization.jsonObject(
+                with: StubURLProtocol.body(of: request)) as! [String: Any]
+            let names = body["documents"] as! [String]
+            XCTAssertTrue(names.allSatisfy { $0.hasPrefix("projects/test-project/") })
+            let payload: [[String: Any]] = [
+                ["found": ["name": "projects/test-project/databases/(default)/documents/users/a",
+                           "fields": ["displayName": ["stringValue": "A"]]],
+                 "readTime": "2027-01-01T00:00:00Z"],
+                ["missing": "projects/test-project/databases/(default)/documents/users/b",
+                 "readTime": "2027-01-01T00:00:00Z"],
+            ]
+            return (200, try! JSONSerialization.data(withJSONObject: payload))
+        }
+        let result = try await client.batchGet(paths: ["users/a", "users/b"])
+        XCTAssertEqual(result["users/a"]??.fields["displayName"], .string("A"))
+        XCTAssertEqual(result["users/b"], .some(nil))
+    }
+
+    func testExpiredTokenIsRefreshedOnceAndRequestRetried() async throws {
+        // First Firestore call answers 401; the client must refresh and retry.
+        nonisolated(unsafe) var firestoreCalls = 0
+        StubURLProtocol.handler = { request in
+            let host = request.url!.host!
+            if host.contains("identitytoolkit") {
+                return (200, Self.json([
+                    "idToken": "token-1", "refreshToken": "refresh-1",
+                    "localId": "uid-1", "expiresIn": "3600",
+                ]))
+            }
+            if host.contains("securetoken") {
+                return (200, Self.json([
+                    "id_token": "token-2", "refresh_token": "refresh-2",
+                    "user_id": "uid-1", "expires_in": "3600",
+                ]))
+            }
+            firestoreCalls += 1
+            if firestoreCalls == 1 {
+                return (401, Self.json(["error": ["message": "expired", "status": "UNAUTHENTICATED"]]))
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-2")
+            return (200, Self.json([
+                "name": "projects/test-project/databases/(default)/documents/users/abc",
+                "fields": [:],
+            ]))
+        }
+        let doc = try await client.getDocument(path: "users/abc")
+        XCTAssertNotNil(doc)
+        XCTAssertEqual(firestoreCalls, 2)
+    }
 }
