@@ -38,6 +38,14 @@ final class AuthSessionStoreTests: XCTestCase {
         let attrs2 = try FileManager.default.attributesOfItem(atPath: path)
         XCTAssertEqual((attrs2[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
         XCTAssertEqual(store.load()?.refreshToken, "r2")
+
+        // A pre-existing wider-permission file (pre-fix build, restored
+        // backup) must come back to 0600 on the next save.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+        try store.save(StoredAuthSession(uid: "abc", refreshToken: "r3"))
+        let attrs3 = try FileManager.default.attributesOfItem(atPath: path)
+        XCTAssertEqual((attrs3[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
+        XCTAssertEqual(store.load()?.refreshToken, "r3")
     }
 
     func testClearRemovesFile() throws {

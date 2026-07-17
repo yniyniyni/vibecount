@@ -46,20 +46,28 @@ struct AuthSessionStore: Sendable {
     func save(_ session: StoredAuthSession) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // Stage into a same-directory temp file created 0600, then swap it
-        // into place — the token is never visible at the final path with
-        // wider than owner-only permissions.
-        let tempURL = directory.appendingPathComponent(".firebase-auth.json.tmp")
+        // Stage into a uniquely named same-directory temp file created 0600,
+        // then swap it into place with .usingNewMetadataOnly so the temp
+        // file's owner-only permissions win even over a pre-existing wider
+        // file — the token is never visible with more than 0600.
+        let tempURL = directory.appendingPathComponent(".firebase-auth-\(UUID().uuidString).tmp")
         guard FileManager.default.createFile(
             atPath: tempURL.path,
             contents: try JSONEncoder().encode(session),
             attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: tempURL)
-        } else {
-            try FileManager.default.moveItem(at: tempURL, to: fileURL)
+        do {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    fileURL, withItemAt: tempURL,
+                    backupItemName: nil, options: .usingNewMetadataOnly)
+            } else {
+                try FileManager.default.moveItem(at: tempURL, to: fileURL)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
         }
     }
 
