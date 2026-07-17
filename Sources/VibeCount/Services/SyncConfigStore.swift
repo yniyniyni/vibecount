@@ -9,6 +9,11 @@ struct SyncConfig: Codable, Equatable, Sendable {
     /// Invite code of the group's host, carried by join links so a joiner
     /// auto-friends the host. nil for hosts.
     var hostInviteCode: String?
+    /// Host-owned Desktop OAuth client for optional Google sign-in. The
+    /// secret is non-confidential for installed apps (Google's own docs);
+    /// both fields present ⇔ Google sign-in is enabled for the group.
+    var googleClientID: String? = nil
+    var googleClientSecret: String? = nil
 }
 
 /// Persists SyncConfig next to firebase-auth.json. The API key is a public

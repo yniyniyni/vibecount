@@ -87,4 +87,18 @@ final class AuthSessionStoreTests: XCTestCase {
         AuthSessionStore.adoptLegacySession(for: "proj-a", directory: directory)
         XCTAssertEqual(current.load()?.uid, "u1")
     }
+
+    func testLegacySessionFileWithoutLinkedEmailDecodes() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"uid":"u1","refreshToken":"r1"}"#.utf8)
+            .write(to: directory.appendingPathComponent("firebase-auth.json"))
+        XCTAssertEqual(store.load(), StoredAuthSession(uid: "u1", refreshToken: "r1"))
+        XCTAssertNil(store.load()?.linkedEmail)
+    }
+
+    func testLinkedEmailRoundTrips() throws {
+        let session = StoredAuthSession(uid: "u1", refreshToken: "r1", linkedEmail: "a@b.c")
+        try store.save(session)
+        XCTAssertEqual(store.load(), session)
+    }
 }

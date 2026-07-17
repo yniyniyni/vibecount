@@ -17,10 +17,13 @@ struct FirebaseConfig: Equatable, Sendable {
     }
 }
 
-/// Persisted anonymous identity — enough to resume the same uid forever.
+/// Persisted identity — enough to resume the same uid forever.
 struct StoredAuthSession: Codable, Equatable, Sendable {
     var uid: String
     var refreshToken: String
+    /// Google account linked onto this uid, nil while anonymous-only.
+    /// Display/status only — the refresh token is the credential.
+    var linkedEmail: String? = nil
 }
 
 /// Owns the 0600 JSON file holding the refresh token. Deliberately NOT the
