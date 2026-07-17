@@ -218,4 +218,90 @@ final class SetupModelTests: XCTestCase {
         XCTAssertNil(model.linkedEmail)
         XCTAssertEqual(model.signInError, GoogleSignInError.server("boom").localizedDescription)
     }
+
+    func testSubmitDefaultCloudCommitsSharedProjectAndRequiresGoogle() async {
+        let box = Box()
+        let model = makeModel(route: .welcome, signInResult: .success("a@b.c"), box: box)
+        await model.submitDefaultCloud()
+        XCTAssertEqual(model.phase, SetupModel.Phase.success)
+        XCTAssertEqual(box.recorder.validated, [DefaultSyncProject.firebaseConfig])
+        XCTAssertEqual(box.recorder.committed, [DefaultSyncProject.syncConfig])
+        XCTAssertTrue(model.isOnDefaultCloud)
+        XCTAssertEqual(model.linkedEmail, "a@b.c")
+        XCTAssertFalse(model.googleSignInRequired)
+    }
+
+    func testSubmitDefaultCloudStaysNeedsGoogleWhenSignInCancelled() async {
+        let box = Box()
+        let model = makeModel(
+            route: .welcome,
+            signInResult: .failure(GoogleSignInError.cancelled),
+            box: box)
+        await model.submitDefaultCloud()
+        XCTAssertEqual(model.phase, SetupModel.Phase.needsGoogleSignIn)
+        XCTAssertEqual(box.recorder.committed, [DefaultSyncProject.syncConfig])
+        XCTAssertNil(model.linkedEmail)
+        XCTAssertTrue(model.googleSignInRequired)
+        XCTAssertEqual(model.signInError, "Google sign-in is required for VibeCount cloud.")
+    }
+
+    func testSubmitDefaultCloudSurfacesValidationFailure() async {
+        let box = Box()
+        let model = makeModel(
+            route: .welcome,
+            validateResult: .failure(.authRejected("API_KEY_INVALID")),
+            box: box)
+        await model.submitDefaultCloud()
+        guard case .failure(let message) = model.phase else {
+            return XCTFail("expected failure, got \(model.phase)")
+        }
+        XCTAssertTrue(message.contains("API_KEY_INVALID") || message.contains("Sign-in"))
+        XCTAssertEqual(box.recorder.committed, [])
+    }
+
+    func testIsOnDefaultCloud() {
+        XCTAssertFalse(makeModel(currentConfig: nil).isOnDefaultCloud)
+        XCTAssertTrue(makeModel(currentConfig: DefaultSyncProject.syncConfig, linkedEmail: "a@b.c").isOnDefaultCloud)
+        let other = SyncConfig(projectID: "other", apiKey: "k", hostInviteCode: nil)
+        XCTAssertFalse(makeModel(currentConfig: other).isOnDefaultCloud)
+    }
+
+    func testGoogleSignInRequiredOnlyOnCloudWithoutLink() {
+        XCTAssertTrue(makeModel(currentConfig: DefaultSyncProject.syncConfig).googleSignInRequired)
+        XCTAssertFalse(makeModel(
+            currentConfig: DefaultSyncProject.syncConfig, linkedEmail: "a@b.c").googleSignInRequired)
+        var selfHost = SyncConfig(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        selfHost.googleClientID = "cid"
+        selfHost.googleClientSecret = "sec"
+        XCTAssertFalse(makeModel(currentConfig: selfHost).googleSignInRequired)
+    }
+
+    func testCloudCancelSurfacesRequiredError() async {
+        let model = makeModel(
+            currentConfig: DefaultSyncProject.syncConfig,
+            signInResult: .failure(GoogleSignInError.cancelled))
+        await model.signInWithGoogle()
+        XCTAssertNil(model.linkedEmail)
+        XCTAssertEqual(model.signInError, "Google sign-in is required for VibeCount cloud.")
+        XCTAssertEqual(model.phase, SetupModel.Phase.needsGoogleSignIn)
+    }
+
+    func testInitOnCloudWithoutLinkStartsNeedsGoogle() {
+        let model = makeModel(route: .settings, currentConfig: DefaultSyncProject.syncConfig)
+        XCTAssertEqual(model.phase, SetupModel.Phase.needsGoogleSignIn)
+        XCTAssertTrue(model.googleSignInAvailable)
+    }
+
+    func testJoinCloudLinkAlsoRequiresGoogle() async {
+        let box = Box()
+        let model = makeModel(
+            route: .join,
+            signInResult: .failure(GoogleSignInError.cancelled),
+            box: box)
+        model.joinText = "vibecount://join?v=1&p=\(DefaultSyncProject.projectID)&k=\(DefaultSyncProject.apiKey)"
+        await model.submitJoin()
+        XCTAssertEqual(model.phase, SetupModel.Phase.needsGoogleSignIn)
+        XCTAssertEqual(box.recorder.committed.first?.googleClientID, DefaultSyncProject.googleClientID)
+        XCTAssertTrue(model.googleSignInRequired)
+    }
 }

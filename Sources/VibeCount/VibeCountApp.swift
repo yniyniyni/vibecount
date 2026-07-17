@@ -322,11 +322,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 },
                 signInWithGoogle: { [weak self] in
                     guard let self,
-                          let config = self.syncConfigStore.load(),
-                          let clientID = config.googleClientID,
+                          let stored = self.syncConfigStore.load() else {
+                        throw GoogleSignInError.notAvailable
+                    }
+                    // Cloud configs always get the shared OAuth pair, even if
+                    // an older install only saved projectID + apiKey.
+                    let config = DefaultSyncProject.enriched(stored)
+                    guard let clientID = config.googleClientID,
                           let clientSecret = config.googleClientSecret,
                           let client = self.firestoreClient else {
                         throw GoogleSignInError.notAvailable
+                    }
+                    // Persist enriched OAuth fields so the next launch is ready.
+                    if config.googleClientID != stored.googleClientID
+                        || config.googleClientSecret != stored.googleClientSecret {
+                        try? self.syncConfigStore.save(config)
                     }
                     let googleToken = try await GoogleSignInFlow()
                         .signIn(clientID: clientID, clientSecret: clientSecret)
