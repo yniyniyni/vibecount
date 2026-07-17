@@ -109,7 +109,10 @@ actor FirestoreClient {
               let userID = json["user_id"] as? String else {
             throw FirestoreClientError.authFailed("malformed refresh response")
         }
-        try store.save(StoredAuthSession(uid: userID, refreshToken: newRefreshToken))
+        // Preserve link status across routine refreshes — this rewrite happens
+        // hourly and must not silently drop the linked-account marker.
+        try store.save(StoredAuthSession(
+            uid: userID, refreshToken: newRefreshToken, linkedEmail: stored.linkedEmail))
         adopt(token: token, uid: userID, expiresIn: json["expires_in"] as? String)
         return token
     }

@@ -45,4 +45,22 @@ final class SyncConfigStoreTests: XCTestCase {
         store.clear()
         XCTAssertNil(store.load())
     }
+
+    func testLegacyConfigWithoutGoogleFieldsDecodes() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"projectID":"p","apiKey":"k"}"#.utf8)
+            .write(to: directory.appendingPathComponent("sync-config.json"))
+        let loaded = store.load()
+        XCTAssertEqual(loaded, SyncConfig(projectID: "p", apiKey: "k", hostInviteCode: nil))
+        XCTAssertNil(loaded?.googleClientID)
+        XCTAssertNil(loaded?.googleClientSecret)
+    }
+
+    func testGoogleFieldsRoundTrip() throws {
+        var config = SyncConfig(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        config.googleClientID = "cid.apps.googleusercontent.com"
+        config.googleClientSecret = "GOCSPX-x"
+        try store.save(config)
+        XCTAssertEqual(store.load(), config)
+    }
 }

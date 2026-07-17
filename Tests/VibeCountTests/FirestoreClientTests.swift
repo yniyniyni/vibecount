@@ -302,4 +302,18 @@ final class FirestoreClientTests: XCTestCase {
         }
         try await client.deleteDocument(path: "users/uid-1/friends/John Smith #legacy")
     }
+
+    func testTokenRefreshPreservesLinkedEmail() async throws {
+        try store.save(StoredAuthSession(uid: "uid-1", refreshToken: "r1", linkedEmail: "a@b.c"))
+        StubURLProtocol.handler = { request in
+            XCTAssertTrue(request.url!.absoluteString.hasPrefix(
+                "https://securetoken.googleapis.com/v1/token?key=test-key"))
+            return (200, Self.json([
+                "id_token": "t2", "refresh_token": "r2",
+                "user_id": "uid-1", "expires_in": "3600",
+            ]))
+        }
+        _ = try await client.signIn()
+        XCTAssertEqual(store.load(), StoredAuthSession(uid: "uid-1", refreshToken: "r2", linkedEmail: "a@b.c"))
+    }
 }
