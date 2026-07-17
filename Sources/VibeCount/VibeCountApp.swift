@@ -19,6 +19,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     var statusItem: NSStatusItem?
     var container: ModelContainer?
     var syncService: (any SyncService)?
+    /// The client behind the current FirestoreSyncService, kept so account
+    /// linking can reach the same session/token state the sync stack uses.
+    var firestoreClient: FirestoreClient?
     let syncConfigStore = SyncConfigStore()
     var setupWindow: NSWindow?
     var usageMonitor: UsageMonitor = ClaudeUsageMonitor()
@@ -229,11 +232,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             // Pre-per-project builds kept one global session file; move it to
             // this project's name once so the existing identity carries over.
             AuthSessionStore.adoptLegacySession(for: config.projectID)
-            return FirestoreSyncService(
-                container: container,
-                backend: FirestoreClient(
-                    config: config,
-                    store: AuthSessionStore(projectID: config.projectID)))
+            let client = FirestoreClient(
+                config: config,
+                store: AuthSessionStore(projectID: config.projectID))
+            firestoreClient = client
+            return FirestoreSyncService(container: container, backend: client)
         }
         logger.notice("No sync config (stored or bundled) — running local-only.")
         return LocalOnlySyncService(context: container.mainContext)
@@ -266,9 +269,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         try BackendSwitcher.prepareForNewBackend(context: container.mainContext)
 
         syncService?.stopSyncing()
-        let service = FirestoreSyncService(
-            container: container,
-            backend: FirestoreClient(config: FirebaseConfig(config), store: authStore))
+        let client = FirestoreClient(config: FirebaseConfig(config), store: authStore)
+        firestoreClient = client
+        let service = FirestoreSyncService(container: container, backend: client)
         syncService = service
         rebuildPopoverContent()
         await service.startSyncing()
@@ -290,10 +293,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         setupWindow?.close()
         let ownInviteCode = try? container?.mainContext
             .fetch(FetchDescriptor<User>()).first?.inviteCode
+        let storedConfig = syncConfigStore.load()
+        let linkedEmail = storedConfig.flatMap {
+            AuthSessionStore(projectID: $0.projectID).load()?.linkedEmail
+        }
         let model = SetupModel(
             route: route,
-            currentConfig: syncConfigStore.load(),
+            currentConfig: storedConfig,
             ownInviteCode: ownInviteCode,
+            linkedEmail: linkedEmail,
             actions: SetupActions(
                 validate: { config, store in
                     // Seed the scratch store with any session previously used
@@ -312,7 +320,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 fetchOwnInviteCode: { [weak self] in
                     try? self?.container?.mainContext.fetch(FetchDescriptor<User>()).first?.inviteCode
                 },
-                signInWithGoogle: { nil },
+                signInWithGoogle: { [weak self] in
+                    guard let self,
+                          let config = self.syncConfigStore.load(),
+                          let clientID = config.googleClientID,
+                          let clientSecret = config.googleClientSecret,
+                          let client = self.firestoreClient else {
+                        throw GoogleSignInError.notAvailable
+                    }
+                    let googleToken = try await GoogleSignInFlow()
+                        .signIn(clientID: clientID, clientSecret: clientSecret)
+                    let outcome = try await client.linkGoogleAccount(googleIDToken: googleToken)
+                    switch outcome {
+                    case .linked(let email):
+                        return email
+                    case .recovered(_, let email):
+                        // A previous install's identity came back: restart
+                        // sync so adoptIdentity migrates the local row and
+                        // the recovered friends list re-syncs.
+                        self.syncService?.stopSyncing()
+                        await self.syncService?.startSyncing()
+                        self.pollUsage()
+                        return email
+                    }
+                },
                 dismiss: { [weak self] in
                     self?.setupWindow?.close()
                     self?.setupWindow = nil
