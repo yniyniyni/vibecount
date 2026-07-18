@@ -11,7 +11,6 @@ final class LeaderboardTabTests: XCTestCase {
     private var context: ModelContext!
 
     override func setUp() async throws {
-        try await super.setUp()
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: Friend.self, configurations: config)
         context = container.mainContext
@@ -20,7 +19,6 @@ final class LeaderboardTabTests: XCTestCase {
     override func tearDown() async throws {
         context = nil
         container = nil
-        try await super.tearDown()
     }
 
     private func friend(_ id: String, daily: Int, monthly: Int) -> Friend {

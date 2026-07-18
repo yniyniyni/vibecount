@@ -11,7 +11,6 @@ final class FirestoreSyncServiceTests: XCTestCase {
     private var service: FirestoreSyncService!
 
     override func setUp() async throws {
-        try await super.setUp()
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         context = container.mainContext
@@ -24,7 +23,6 @@ final class FirestoreSyncServiceTests: XCTestCase {
         backend = nil
         context = nil
         container = nil
-        try await super.tearDown()
     }
 
     func testStartCreatesIdentityInviteCodeAndUserDoc() async throws {

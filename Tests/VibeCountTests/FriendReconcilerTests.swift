@@ -12,7 +12,6 @@ final class FriendReconcilerTests: XCTestCase {
     private var reconciler: FriendReconciler!
 
     override func setUp() async throws {
-        try await super.setUp()
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         context = container.mainContext
@@ -23,7 +22,6 @@ final class FriendReconcilerTests: XCTestCase {
         reconciler = nil
         context = nil
         container = nil
-        try await super.tearDown()
     }
 
     private func ids() throws -> Set<String> {
