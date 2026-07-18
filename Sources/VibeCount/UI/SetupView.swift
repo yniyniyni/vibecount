@@ -17,16 +17,26 @@ struct SetupView: View {
     @Bindable var model: SetupModel
 
     var body: some View {
-        Group {
-            switch model.route {
-            case .welcome: welcome
-            case .host: host
-            case .join: join
-            case .settings: settings
+        ScrollView {
+            Group {
+                switch model.route {
+                case .welcome: welcome
+                case .host: host
+                case .join: join
+                case .settings: settings
+                }
             }
+            .frame(width: 460, alignment: .topLeading)
+            .padding(20)
         }
-        .frame(width: 460)
-        .padding(20)
+        // A fully fixed content size is load-bearing, not cosmetic. NSHostingView
+        // derives the window's size extrema from SwiftUI's computed size every
+        // Update-Constraints pass; if that size can change between passes, the
+        // window keeps requesting more passes until AppKit trips its runaway guard
+        // ("more Update Constraints passes than views") and aborts the app with an
+        // uncaught NSException (silent SIGTRAP via +[NSApplication _crashOnException:]).
+        // Pinning both dimensions keeps the extrema constant; overflow scrolls.
+        .frame(width: 500, height: 600)
     }
 
     // MARK: Welcome
@@ -89,59 +99,59 @@ struct SetupView: View {
     // MARK: Host wizard
 
     private var host: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Host a Group").font(.title2.bold())
-                step(1, "Create a Firebase project",
-                     "Any name works. Skip Google Analytics.",
-                     link: URL(string: "https://console.firebase.google.com/")!)
-                step(2, "Create the Firestore database",
-                     "Firestore Database → Create database → production mode. Any location.",
-                     link: ConsoleURL.url("firestore", projectID: model.projectID))
-                step(3, "Enable Anonymous sign-in",
-                     "Authentication → Sign-in method → Anonymous → Enable.",
-                     link: ConsoleURL.url("authentication/providers", projectID: model.projectID))
-                VStack(alignment: .leading, spacing: 6) {
-                    stepHeader(4, "Publish the security rules")
-                    Text("Firestore Database → Rules → replace everything with the rules below → Publish.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("Copy rules") { Clipboard.copy(SecurityRules.text) }
-                        Link("Open rules editor",
-                             destination: ConsoleURL.url("firestore/rules", projectID: model.projectID))
-                    }
+        // No inner ScrollView: the SetupView root already scrolls. Nesting a
+        // second vertical scroll view here would break scrolling and reintroduce
+        // an unstable content height.
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Host a Group").font(.title2.bold())
+            step(1, "Create a Firebase project",
+                 "Any name works. Skip Google Analytics.",
+                 link: URL(string: "https://console.firebase.google.com/")!)
+            step(2, "Create the Firestore database",
+                 "Firestore Database → Create database → production mode. Any location.",
+                 link: ConsoleURL.url("firestore", projectID: model.projectID))
+            step(3, "Enable Anonymous sign-in",
+                 "Authentication → Sign-in method → Anonymous → Enable.",
+                 link: ConsoleURL.url("authentication/providers", projectID: model.projectID))
+            VStack(alignment: .leading, spacing: 6) {
+                stepHeader(4, "Publish the security rules")
+                Text("Firestore Database → Rules → replace everything with the rules below → Publish.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Copy rules") { Clipboard.copy(SecurityRules.text) }
+                    Link("Open rules editor",
+                         destination: ConsoleURL.url("firestore/rules", projectID: model.projectID))
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    stepHeader(5, "Paste the project's identifiers")
-                    Text("Project ID: Project settings (gear icon) → General. API key: register an app under Your apps on that same page (a Web app </> is fastest — no download) and copy the apiKey from its config snippet.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    TextField("Project ID (e.g. my-vibes-1a2b3)", text: $model.projectID)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Web API Key (starts with AIza…)", text: $model.apiKey)
-                        .textFieldStyle(.roundedBorder)
-                    Link("Open project settings",
-                         destination: ConsoleURL.url("settings/general", projectID: model.projectID))
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    stepHeader(6, "Enable Google sign-in (optional)")
-                    Text("Lets members protect their identity with their Google account (survives reinstalls). Authentication → Sign-in method → enable Google. Then in Google Cloud Credentials: set the consent screen name, publish it, create an OAuth client of type \"Desktop app\", and paste its ID and secret. Skip to keep anonymous-only.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    TextField("OAuth Client ID (…apps.googleusercontent.com)", text: $model.googleClientIDField)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("OAuth Client secret (GOCSPX-…)", text: $model.googleClientSecretField)
-                        .textFieldStyle(.roundedBorder)
-                    HStack {
-                        Link("Open Authentication providers",
-                             destination: ConsoleURL.url("authentication/providers", projectID: model.projectID))
-                        Link("Open Cloud Credentials",
-                             destination: cloudCredentialsURL)
-                    }
-                }
-                phaseFooter(submitTitle: "Validate & Finish") { await model.submitHost() }
-                backLink
             }
+            VStack(alignment: .leading, spacing: 6) {
+                stepHeader(5, "Paste the project's identifiers")
+                Text("Project ID: Project settings (gear icon) → General. API key: register an app under Your apps on that same page (a Web app </> is fastest — no download) and copy the apiKey from its config snippet.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("Project ID (e.g. my-vibes-1a2b3)", text: $model.projectID)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Web API Key (starts with AIza…)", text: $model.apiKey)
+                    .textFieldStyle(.roundedBorder)
+                Link("Open project settings",
+                     destination: ConsoleURL.url("settings/general", projectID: model.projectID))
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                stepHeader(6, "Enable Google sign-in (optional)")
+                Text("Lets members protect their identity with their Google account (survives reinstalls). Authentication → Sign-in method → enable Google. Then in Google Cloud Credentials: set the consent screen name, publish it, create an OAuth client of type \"Desktop app\", and paste its ID and secret. Skip to keep anonymous-only.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("OAuth Client ID (…apps.googleusercontent.com)", text: $model.googleClientIDField)
+                    .textFieldStyle(.roundedBorder)
+                TextField("OAuth Client secret (GOCSPX-…)", text: $model.googleClientSecretField)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Link("Open Authentication providers",
+                         destination: ConsoleURL.url("authentication/providers", projectID: model.projectID))
+                    Link("Open Cloud Credentials",
+                         destination: cloudCredentialsURL)
+                }
+            }
+            phaseFooter(submitTitle: "Validate & Finish") { await model.submitHost() }
+            backLink
         }
-        .frame(maxHeight: 560)
     }
 
     // MARK: Join

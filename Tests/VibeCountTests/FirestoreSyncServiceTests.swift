@@ -10,8 +10,7 @@ final class FirestoreSyncServiceTests: XCTestCase {
     private var backend: MockFirestoreBackend!
     private var service: FirestoreSyncService!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         context = container.mainContext
@@ -19,12 +18,11 @@ final class FirestoreSyncServiceTests: XCTestCase {
         service = FirestoreSyncService(container: container, backend: backend)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         service = nil
         backend = nil
         context = nil
         container = nil
-        super.tearDown()
     }
 
     func testStartCreatesIdentityInviteCodeAndUserDoc() async throws {

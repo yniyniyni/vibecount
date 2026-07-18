@@ -4,12 +4,14 @@ enum JoinLinkError: Error, Equatable, LocalizedError {
     case notAJoinLink
     case unsupportedVersion
     case missingFields
+    case malformedField
 
     var errorDescription: String? {
         switch self {
         case .notAJoinLink: "That doesn't look like a VibeCount join link."
         case .unsupportedVersion: "This join link needs a newer version of VibeCount."
         case .missingFields: "This join link is incomplete — ask the host to re-share it."
+        case .malformedField: "This join link contains invalid characters — ask the host to re-share it."
         }
     }
 }
@@ -75,6 +77,14 @@ struct JoinLink: Equatable {
               let apiKey = query["k"], !apiKey.isEmpty else {
             return .failure(.missingFields)
         }
+        // A join link is untrusted input. FirestoreClient interpolates the
+        // project id and API key straight into REST URLs it builds with a
+        // force-unwrapped `URL(string:)`, so any value carrying characters
+        // outside the URL-unreserved set could crash that construction (or, at
+        // best, produce a bogus path). Reject those here, at the boundary.
+        guard Self.isURLSafe(projectID), Self.isURLSafe(apiKey) else {
+            return .failure(.malformedField)
+        }
         var link = JoinLink(
             projectID: projectID, apiKey: apiKey,
             hostInviteCode: query["c"].flatMap(InviteCode.normalize))
@@ -84,5 +94,16 @@ struct JoinLink: Equatable {
             link.googleClientSecret = gs
         }
         return .success(link)
+    }
+
+    /// The RFC 3986 "unreserved" set — safe to sit anywhere in a URL's path or
+    /// query without escaping, breaking parsing, or altering the host. Real
+    /// Firebase project ids (`[a-z0-9-]`) and Web API keys (`AIza…`, alphanumeric
+    /// plus `-_`) are always a subset.
+    private static let urlUnreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    private static func isURLSafe(_ value: String) -> Bool {
+        CharacterSet(charactersIn: value).isSubset(of: urlUnreserved)
     }
 }

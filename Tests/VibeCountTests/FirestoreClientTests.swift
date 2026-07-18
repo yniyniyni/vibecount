@@ -115,6 +115,26 @@ final class FirestoreClientTests: XCTestCase {
         XCTAssertEqual(store.load()?.uid, "uid-new")
     }
 
+    func testConfigErrorDuringRefreshDoesNotWipeStoredIdentity() async throws {
+        // A 4xx that is NOT a dead-token code (here a rotated/invalid API key)
+        // must surface as an error — never orphan the stored identity by minting
+        // a fresh anonymous user, which would lose the user's leaderboard/friends.
+        try store.save(StoredAuthSession(uid: "uid-1", refreshToken: "refresh-1"))
+        StubURLProtocol.handler = { request in
+            XCTAssertTrue(request.url!.host!.contains("securetoken"),
+                          "a config error must not fall through to a fresh signUp")
+            return (400, Self.json(["error": ["message": "API_KEY_INVALID"]]))
+        }
+        do {
+            _ = try await client.signIn()
+            XCTFail("expected authFailed")
+        } catch let error as FirestoreClientError {
+            XCTAssertEqual(error, .authFailed("API_KEY_INVALID"))
+        }
+        XCTAssertEqual(store.load(), StoredAuthSession(uid: "uid-1", refreshToken: "refresh-1"),
+                       "a non-terminal auth failure must not abandon the identity")
+    }
+
     func testAuthErrorSurfacesServerMessage() async {
         StubURLProtocol.handler = { _ in
             (400, Self.json(["error": ["message": "CONFIGURATION_NOT_FOUND"]]))

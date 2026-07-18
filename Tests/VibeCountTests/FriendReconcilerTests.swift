@@ -11,19 +11,17 @@ final class FriendReconcilerTests: XCTestCase {
     private var context: ModelContext!
     private var reconciler: FriendReconciler!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         context = container.mainContext
         reconciler = FriendReconciler(context: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         reconciler = nil
         context = nil
         container = nil
-        super.tearDown()
     }
 
     private func ids() throws -> Set<String> {

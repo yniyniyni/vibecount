@@ -11,19 +11,17 @@ final class LocalOnlySyncServiceTests: XCTestCase {
     private var context: ModelContext!
     private var service: LocalOnlySyncService!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(for: User.self, Friend.self, configurations: config)
         context = container.mainContext
         service = LocalOnlySyncService(context: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         service = nil
         context = nil
         container = nil
-        super.tearDown()
     }
 
     func testStartInsertsNoFabricatedData() async throws {
