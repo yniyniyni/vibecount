@@ -11,7 +11,6 @@ final class FriendUpsertTests: XCTestCase {
 
     override func tearDown() async throws {
         container = nil
-        try await super.tearDown()
     }
 
     private func makeContext() throws -> ModelContext {
