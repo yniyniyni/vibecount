@@ -97,6 +97,6 @@ npm test
 
 The repository currently builds an ad-hoc-signed development bundle. It does
 not yet contain a Developer ID signing, hardened runtime, notarization, release
-CI, installer, or automatic-update pipeline. See the production-hardening plan
-in `docs/superpowers/plans/2026-07-17-production-hardening.md` before shipping a
-public release.
+CI, installer, or automatic-update pipeline. See the
+[production-hardening plan](docs/superpowers/plans/2026-07-17-production-hardening.md)
+before shipping a public release.
