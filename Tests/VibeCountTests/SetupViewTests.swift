@@ -20,6 +20,17 @@ final class SetupViewTests: XCTestCase {
         }
     }
 
+    func testEveryRouteHasFixedFittingSize() {
+        // A constant fitting size across routes is what prevents the window-size
+        // feedback loop that trapped the app (SIGTRAP via _crashOnException).
+        for route in [SetupModel.Route.welcome, .host, .join, .settings] {
+            let hosting = NSHostingView(rootView: SetupView(model: model(route: route)))
+            XCTAssertEqual(
+                hosting.fittingSize, NSSize(width: 500, height: 600),
+                "route \(route) should report a fixed fitting size")
+        }
+    }
+
     func testConsoleURLWithAndWithoutProject() {
         XCTAssertEqual(
             ConsoleURL.url("firestore", projectID: "my-proj").absoluteString,

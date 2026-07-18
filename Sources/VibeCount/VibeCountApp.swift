@@ -286,7 +286,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     // MARK: - Setup window
 
     @objc func openSyncSettings() {
-        showSetupWindow(route: syncConfigStore.load() == nil ? .welcome : .settings)
+        // The dashboard posts OpenSyncSettings *synchronously* from inside the
+        // popover button's action, so this runs while we're still nested in the
+        // transient popover's own click handling. Building an NSWindow and
+        // calling NSApp.activate / makeKeyAndOrderFront from there races the
+        // popover's dismissal — AppKit tears down the in-flight UI transaction,
+        // the status item disappears, and no window ever shows. Close the
+        // popover now and present on the next runloop turn, once the click cycle
+        // has fully unwound.
+        popover?.performClose(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.showSetupWindow(route: self.syncConfigStore.load() == nil ? .welcome : .settings)
+        }
     }
 
     func showSetupWindow(route: SetupModel.Route) {
@@ -358,10 +370,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                     self?.setupWindow?.close()
                     self?.setupWindow = nil
                 }))
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SetupView(model: model)))
+        let hostingController = NSHostingController(rootView: SetupView(model: model))
+        // NSHostingController defaults to `.preferredContentSize`, which makes it
+        // continuously resize the window to SwiftUI's computed content size. On
+        // macOS 26 that animated-resize path (NSHostingView.updateAnimatedWindowSize
+        // → windowDidLayout) traps (SIGTRAP) while laying out SetupView, killing
+        // the app with no crash log or stderr. Drop `.preferredContentSize` and
+        // pin the window size ourselves so SwiftUI never drives the resize.
+        hostingController.sizingOptions = .standardBounds
+        let window = NSWindow(contentViewController: hostingController)
         window.title = "VibeCount Sync"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 500, height: 600))
         window.delegate = self
         window.center()
         setupWindow = window
