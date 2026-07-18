@@ -133,8 +133,10 @@ actor FirestoreClient {
             string: "https://securetoken.googleapis.com/v1/token?key=\(config.apiKey)")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(
-            "grant_type=refresh_token&refresh_token=\(stored.refreshToken)".utf8)
+        request.httpBody = Self.formEncode([
+            ("grant_type", "refresh_token"),
+            ("refresh_token", stored.refreshToken),
+        ])
         let json = try await authRequest(request)
         // Note: this endpoint answers in snake_case, unlike signUp.
         guard let token = json["id_token"] as? String,
@@ -148,6 +150,20 @@ actor FirestoreClient {
             uid: userID, refreshToken: newRefreshToken, linkedEmail: stored.linkedEmail))
         adopt(token: token, uid: userID, expiresIn: json["expires_in"] as? String)
         return token
+    }
+
+    /// Strict application/x-www-form-urlencoded body: every value character
+    /// outside the unreserved set is percent-encoded (including `+`, which a
+    /// form decoder would otherwise read back as a space). The refresh token
+    /// is an opaque server-issued string, so it must survive round-tripping
+    /// byte-for-byte.
+    private static func formEncode(_ items: [(String, String)]) -> Data {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let query = items.map { key, value in
+            "\(key)=\(value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value)"
+        }.joined(separator: "&")
+        return Data(query.utf8)
     }
 
     private func adopt(token: String, uid: String, expiresIn: String?) {

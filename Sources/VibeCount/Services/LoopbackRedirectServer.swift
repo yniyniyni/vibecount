@@ -78,16 +78,37 @@ actor LoopbackRedirectServer {
     private func accept(_ connection: NWConnection) {
         connections.append(connection)
         connection.start(queue: .global(qos: .userInitiated))
+        read(from: connection, accumulated: Data())
+    }
+
+    /// Reads until the request line is complete (CRLF seen). Loopback requests
+    /// almost always arrive in one segment, but a request line split across
+    /// segments must be reassembled — a partial read would otherwise parse as
+    /// an empty path and could consume the one-shot delivery.
+    private func read(from connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] data, _, _, _ in
             guard let data, !data.isEmpty else { return }
-            Task { await self?.handle(data: data, on: connection) }
+            Task { await self?.consume(chunk: data, accumulated: accumulated, on: connection) }
         }
     }
 
-    private func handle(data: Data, on connection: NWConnection) {
+    private func consume(chunk: Data, accumulated: Data, on connection: NWConnection) {
+        var buffer = accumulated
+        buffer.append(chunk)
+        guard buffer.range(of: Data("\r\n".utf8)) != nil else {
+            if buffer.count < 16 * 1024 {
+                read(from: connection, accumulated: buffer)
+            } else {
+                connection.cancel()
+            }
+            return
+        }
+        handle(head: String(decoding: buffer, as: UTF8.self), on: connection)
+    }
+
+    private func handle(head: String, on connection: NWConnection) {
         // "GET /callback?code=x&state=y HTTP/1.1" — the request line is all
         // we need; headers and body are irrelevant for a redirect catch.
-        let head = String(decoding: data, as: UTF8.self)
         let target = head.split(separator: "\r\n").first?.split(separator: " ")
             .dropFirst().first.map(String.init) ?? "/"
         let components = URLComponents(string: target)
@@ -95,11 +116,18 @@ actor LoopbackRedirectServer {
             path: components?.path ?? "/",
             queryItems: components?.queryItems ?? [])
 
+        // Only a plausible OAuth redirect (carrying a code or an error) may
+        // consume the one-shot delivery. Anything else poking the port — a
+        // favicon fetch, a port scanner, a stray local process — gets a 404
+        // and the listener keeps waiting for the real redirect.
+        let names = Set(request.queryItems.map(\.name))
+        guard !names.isDisjoint(with: ["code", "error"]) else {
+            respond(status: "404 Not Found", body: "", on: connection)
+            return
+        }
+
         let html = "<html><body style=\"font-family:-apple-system\"><h3>Signed in — you can close this tab and return to VibeCount.</h3></body></html>"
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n\(html)"
-        connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        respond(status: "200 OK", body: html, on: connection)
 
         guard !delivered else { return }
         delivered = true
@@ -109,5 +137,12 @@ actor LoopbackRedirectServer {
         } else {
             buffered = request
         }
+    }
+
+    private func respond(status: String, body: String, on connection: NWConnection) {
+        let response = "HTTP/1.1 \(status)\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+        connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
     }
 }
