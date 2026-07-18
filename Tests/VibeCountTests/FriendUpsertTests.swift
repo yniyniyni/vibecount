@@ -9,9 +9,9 @@ final class FriendUpsertTests: XCTestCase {
     // and store access after the container deallocates traps inside SwiftData.
     private var container: ModelContainer!
 
-    override func tearDown() {
+    override func tearDown() async throws {
         container = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func makeContext() throws -> ModelContext {
