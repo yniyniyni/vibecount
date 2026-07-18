@@ -50,6 +50,24 @@ final class JoinLinkTests: XCTestCase {
         XCTAssertEqual(JoinLink.parse("vibecount://join?v=1&p=&k=k"), .failure(.missingFields))
     }
 
+    func testRejectsMalformedProjectOrKey() {
+        // A slash would smuggle extra path (or a different resource) into the
+        // Firestore REST URL; a space breaks URL(string:) outright. Both must
+        // be rejected at the parse boundary rather than crashing later.
+        XCTAssertEqual(
+            JoinLink.parse("vibecount://join?v=1&p=proj/evil&k=key"), .failure(.malformedField))
+        XCTAssertEqual(
+            JoinLink.parse("vibecount://join?v=1&p=proj&k=a%20b"), .failure(.malformedField))
+    }
+
+    func testAcceptsRealisticProjectAndKey() throws {
+        // Real Firebase ids/keys use only unreserved characters and must pass.
+        let parsed = try JoinLink.parse(
+            "vibecount://join?v=1&p=vibe-count-app-0703&k=AIzaSyDt9_eZ-Esz").get()
+        XCTAssertEqual(parsed.projectID, "vibe-count-app-0703")
+        XCTAssertEqual(parsed.apiKey, "AIzaSyDt9_eZ-Esz")
+    }
+
     func testGoogleParamsRoundTrip() throws {
         var link = JoinLink(projectID: "p", apiKey: "k", hostInviteCode: nil)
         link.googleClientID = "cid.apps.googleusercontent.com"
