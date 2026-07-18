@@ -74,13 +74,36 @@ actor FirestoreClient {
         if let stored = store.load() {
             do {
                 return try await refresh(stored)
-            } catch FirestoreClientError.authFailed {
-                // Refresh token revoked or malformed — the identity is gone;
-                // clear it and mint a fresh anonymous user below.
+            } catch FirestoreClientError.authFailed(let message) {
+                // Only a definitively dead refresh token justifies discarding the
+                // identity and re-registering as a new anonymous user. Other 4xx
+                // failures (a rotated/invalid API key, a project misconfiguration)
+                // are also `authFailed` but are fixable — abandoning the identity
+                // over them would orphan the user's leaderboard and friends, so
+                // surface them to the caller instead.
+                guard Self.isTerminalRefreshFailure(message) else {
+                    throw FirestoreClientError.authFailed(message)
+                }
                 store.clear()
             }
         }
         return try await signUpAnonymously()
+    }
+
+    /// Identity Toolkit / SecureToken refresh failures that mean the stored
+    /// refresh token can never work again — re-registering anonymously is the
+    /// only way forward. Everything else (config errors, transient outages) is
+    /// deliberately excluded so a bad key or a blip never abandons the identity.
+    private static let terminalRefreshFailures: Set<String> = [
+        "INVALID_REFRESH_TOKEN", "TOKEN_EXPIRED", "USER_DISABLED",
+        "USER_NOT_FOUND", "INVALID_GRANT",
+    ]
+
+    private static func isTerminalRefreshFailure(_ message: String) -> Bool {
+        // The server sometimes suffixes a human description ("TOKEN_EXPIRED: …");
+        // match on the leading code.
+        let code = message.split(separator: ":", maxSplits: 1).first.map(String.init) ?? message
+        return terminalRefreshFailures.contains(code.trimmingCharacters(in: .whitespaces))
     }
 
     /// Drops the cached ID token so the next call refreshes (401 recovery).
