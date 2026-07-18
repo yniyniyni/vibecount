@@ -304,4 +304,24 @@ final class SetupModelTests: XCTestCase {
         XCTAssertEqual(box.recorder.committed.first?.googleClientID, DefaultSyncProject.googleClientID)
         XCTAssertTrue(model.googleSignInRequired)
     }
+
+    func testConfirmBeforeSubmitAlwaysCoversJoinRoute() {
+        // First-time join must confirm: a deep link prefilled by a webpage
+        // must never be one click away from committing a backend.
+        XCTAssertTrue(makeModel(route: .join).confirmBeforeSubmit)
+        // First-time host: nothing to abandon, no prefilled input — no dialog.
+        XCTAssertFalse(makeModel(route: .host).confirmBeforeSubmit)
+        // Any stored config confirms regardless of route (identity abandonment).
+        let config = SyncConfig(projectID: "p", apiKey: "k", hostInviteCode: nil)
+        XCTAssertTrue(makeModel(route: .host, currentConfig: config).confirmBeforeSubmit)
+    }
+
+    func testPendingJoinProjectIDParsesJoinText() {
+        let model = makeModel(route: .join)
+        XCTAssertNil(model.pendingJoinProjectID)
+        model.joinText = "vibecount://join?v=1&p=evil-project&k=AIzaKey"
+        XCTAssertEqual(model.pendingJoinProjectID, "evil-project")
+        model.joinText = "not a link"
+        XCTAssertNil(model.pendingJoinProjectID)
+    }
 }

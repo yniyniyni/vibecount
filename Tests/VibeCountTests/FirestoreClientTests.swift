@@ -99,6 +99,22 @@ final class FirestoreClientTests: XCTestCase {
         XCTAssertEqual(store.load()?.refreshToken, "refresh-2", "rotated token must be persisted")
     }
 
+    func testRefreshTokenWithReservedCharactersIsFormEncoded() async throws {
+        // Opaque server-issued tokens must survive form encoding byte-for-byte;
+        // `&`, `=`, space, and `+` would all corrupt a raw interpolation.
+        try store.save(StoredAuthSession(uid: "uid-1", refreshToken: "re+fresh 1&x=y"))
+        StubURLProtocol.handler = { request in
+            let body = String(decoding: StubURLProtocol.body(of: request), as: UTF8.self)
+            XCTAssertTrue(body.contains("refresh_token=re%2Bfresh%201%26x%3Dy"), body)
+            return (200, Self.json([
+                "id_token": "token-2", "refresh_token": "refresh-2",
+                "user_id": "uid-1", "expires_in": "3600",
+            ]))
+        }
+        let uid = try await client.signIn()
+        XCTAssertEqual(uid, "uid-1")
+    }
+
     func testInvalidRefreshTokenFallsBackToFreshSignUp() async throws {
         try store.save(StoredAuthSession(uid: "uid-old", refreshToken: "revoked"))
         StubURLProtocol.handler = { request in

@@ -139,6 +139,21 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 100)
     }
 
+    func testAcceptsTimestampsWithoutFractionalSeconds() async throws {
+        // Whole-second ISO 8601 rows must count too — dropping them silently
+        // undercounts usage.
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let ts = plain.string(from: startOfToday.addingTimeInterval(3_600))
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: ts, messageId: "m1", requestId: "r1", output: 40)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.daily, 40)
+        XCTAssertEqual(usage.monthly, 40)
+    }
+
     func testDeduplicationIsPerFile() async throws {
         // The same key in two different files is counted once per file — documents
         // the intentional per-file (not global) de-duplication.

@@ -298,7 +298,7 @@ struct SetupView: View {
                     .foregroundStyle(.orange).font(.caption)
             }
             Button(submitTitle) {
-                if model.isSwitchingBackends {
+                if model.confirmBeforeSubmit {
                     confirmingSwitch = true
                 } else {
                     Task { await submit() }
@@ -306,15 +306,26 @@ struct SetupView: View {
             }
             .buttonStyle(.borderedProminent)
             .confirmationDialog(
-                "Switch to a different group?", isPresented: $confirmingSwitch) {
-                Button("Leave current group and switch", role: .destructive) {
+                model.isSwitchingBackends ? "Switch to a different group?" : "Join this group?",
+                isPresented: $confirmingSwitch) {
+                Button(model.isSwitchingBackends ? "Leave current group and switch" : "Join and start syncing",
+                       role: model.isSwitchingBackends ? .destructive : nil) {
                     Task { await submit() }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("You'll leave your current group: your friends list on this Mac is cleared and your old leaderboard identity is abandoned. This can't be undone.")
+                Text(confirmationMessage)
             }
         }
+    }
+
+    private var confirmationMessage: String {
+        if model.isSwitchingBackends {
+            return "You'll leave your current group: your friends list on this Mac is cleared and your old leaderboard identity is abandoned. This can't be undone."
+        }
+        let project = model.pendingJoinProjectID.map { "the Firebase project \"\($0)\"" }
+            ?? "the group's Firebase project"
+        return "Your name and usage totals will be uploaded to \(project). Only join groups from people you trust."
     }
 
     private var backLink: some View {
