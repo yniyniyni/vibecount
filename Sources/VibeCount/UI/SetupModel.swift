@@ -63,6 +63,20 @@ final class SetupModel {
     /// config — so the UI must confirm whenever a config is already stored.
     var isSwitchingBackends: Bool { currentConfig != nil }
 
+    /// Whether tapping submit must show a confirmation first. Switching
+    /// backends always confirms (identity abandonment); a first-time join
+    /// confirms too, so a `vibecount://` deep link prefilled by a webpage can
+    /// never point the app at an unexpected backend with a single click.
+    var confirmBeforeSubmit: Bool { isSwitchingBackends || route == .join }
+
+    /// Project id the pasted join text would connect to, or nil while it
+    /// doesn't parse. Surfaced in the join confirmation so the user sees
+    /// exactly which backend their name and usage totals would be uploaded to.
+    var pendingJoinProjectID: String? {
+        if case .success(let link) = JoinLink.parse(joinText) { return link.projectID }
+        return nil
+    }
+
     /// The link any group member can send to a prospective friend.
     var shareLink: String? {
         guard let currentConfig else { return nil }

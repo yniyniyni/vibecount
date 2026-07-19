@@ -31,8 +31,13 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
 
+        // Fractional and whole-second ISO 8601 both occur in the wild; a
+        // single-formatter parse would silently drop (undercount) whichever
+        // variant it doesn't match. Mirrors FirestoreValue's timestamp decode.
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlainFormatter = ISO8601DateFormatter()
+        isoPlainFormatter.formatOptions = [.withInternetDateTime]
 
         var totalDaily = 0
         var totalMonthly = 0
@@ -48,7 +53,8 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 at: url,
                 startOfToday: startOfToday,
                 startOf30Days: startOf30Days,
-                isoFormatter: isoFormatter
+                isoFormatter: isoFormatter,
+                isoPlainFormatter: isoPlainFormatter
             )
             totalDaily += daily
             totalMonthly += monthly
@@ -91,7 +97,8 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         at url: URL,
         startOfToday: Date,
         startOf30Days: Date,
-        isoFormatter: ISO8601DateFormatter
+        isoFormatter: ISO8601DateFormatter,
+        isoPlainFormatter: ISO8601DateFormatter
     ) throws -> (daily: Int, monthly: Int) {
         let reader: LineReader
         do {
@@ -133,7 +140,8 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String, type == "assistant",
                       let timestampStr = json["timestamp"] as? String,
-                      let date = isoFormatter.date(from: timestampStr) else { return }
+                      let date = isoFormatter.date(from: timestampStr)
+                        ?? isoPlainFormatter.date(from: timestampStr) else { return }
 
                 // Outside the monthly window → irrelevant to both totals.
                 guard date >= startOf30Days else { return }
