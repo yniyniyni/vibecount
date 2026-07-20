@@ -19,6 +19,16 @@ actor LoopbackRedirectServer {
     /// is buffered, not dropped — the browser can be faster than the caller.
     private var buffered: Request?
     private var delivered = false
+    private var expectedState: String?
+
+    /// Registers the state nonce the flow put in the authorize URL. Once set,
+    /// only a redirect echoing this exact value may consume the one-shot
+    /// delivery, so a local process that doesn't know the nonce can neither
+    /// hijack nor kill the sign-in. Call between start() and opening the
+    /// browser, so the gate is up before any redirect can arrive.
+    func expect(state: String) {
+        expectedState = state
+    }
 
     func start() async throws -> UInt16 {
         let parameters = NWParameters.tcp
@@ -56,6 +66,14 @@ actor LoopbackRedirectServer {
         }
         defer { timeoutTask.cancel() }
         return try await withCheckedThrowingContinuation { continuation in
+            // Entering the continuation is a suspension point, so a redirect
+            // can land between the check above and here; deliver it now
+            // instead of parking it in `buffered` past the timeout.
+            if let buffered {
+                self.buffered = nil
+                continuation.resume(returning: buffered)
+                return
+            }
             pending = continuation
         }
     }
@@ -117,16 +135,27 @@ actor LoopbackRedirectServer {
             queryItems: components?.queryItems ?? [])
 
         // Only a plausible OAuth redirect (carrying a code or an error) may
-        // consume the one-shot delivery. Anything else poking the port — a
-        // favicon fetch, a port scanner, a stray local process — gets a 404
-        // and the listener keeps waiting for the real redirect.
-        let names = Set(request.queryItems.map(\.name))
-        guard !names.isDisjoint(with: ["code", "error"]) else {
+        // consume the one-shot delivery — and once the flow has registered
+        // its state nonce, the redirect must echo it. OAuth echoes state on
+        // success and error redirects alike, so real redirects always pass;
+        // anything else poking the port (a favicon fetch, a port scanner, a
+        // stray local process) gets a 404 and the listener keeps waiting.
+        var query: [String: String] = [:]
+        for item in request.queryItems where query[item.name] == nil {
+            query[item.name] = item.value
+        }
+        let plausible = query["code"] != nil || query["error"] != nil
+        let stateMatches = expectedState == nil || query["state"] == expectedState
+        guard plausible, stateMatches else {
             respond(status: "404 Not Found", body: "", on: connection)
             return
         }
 
-        let html = "<html><body style=\"font-family:-apple-system\"><h3>Signed in — you can close this tab and return to VibeCount.</h3></body></html>"
+        // An error redirect (consent denied) must not claim success.
+        let heading = query["code"] != nil
+            ? "Signed in — you can close this tab and return to VibeCount."
+            : "Sign-in was not completed — you can close this tab and return to VibeCount."
+        let html = "<html><body style=\"font-family:-apple-system\"><h3>\(heading)</h3></body></html>"
         respond(status: "200 OK", body: html, on: connection)
 
         guard !delivered else { return }

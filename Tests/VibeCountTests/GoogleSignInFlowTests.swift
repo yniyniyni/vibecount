@@ -60,7 +60,7 @@ final class GoogleSignInFlowTests: XCTestCase {
                 Task { _ = try? await URLSession.shared.data(from: redirect) }
             },
             session: Self.stubbedSession(),
-            timeout: 5)
+            timeout: 1)
         do {
             _ = try await flow.signIn(clientID: "cid", clientSecret: "sec")
             XCTFail("expected cancelled")
