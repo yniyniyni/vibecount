@@ -43,10 +43,20 @@ struct AuthSessionStore: Sendable {
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VibeCount", isDirectory: true)
-        let name = projectID.map { pid in
-            "firebase-auth-\(pid.filter { $0.isLetter || $0.isNumber || $0 == "-" }).json"
-        } ?? "firebase-auth.json"
+        let name = projectID.map { "firebase-auth-\(Self.encodeForFileName($0)).json" }
+            ?? "firebase-auth.json"
         fileURL = base.appendingPathComponent(name)
+    }
+
+    /// Injective file-name encoding of a project id: alphanumerics and "-"
+    /// pass through (real Firebase project ids are [a-z0-9-], so existing
+    /// installs keep their file names), everything else — including "%"
+    /// itself — is percent-encoded. The old lossy `filter` mapped distinct
+    /// ids ("my.project", "myproject") onto one file, crossing identities.
+    private static func encodeForFileName(_ projectID: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-")
+        return projectID.addingPercentEncoding(withAllowedCharacters: allowed) ?? projectID
     }
 
     /// One-time move of the legacy single-session file to the per-project
