@@ -92,6 +92,62 @@ final class LoopbackRedirectServerTests: XCTestCase {
         await server.stop()
     }
 
+    func testWrongStateRedirectGets404AndDoesNotConsumeDelivery() async throws {
+        let server = LoopbackRedirectServer()
+        let port = try await server.start()
+        await server.expect(state: "good")
+        async let redirect = server.awaitRedirect(timeout: 5)
+        try await Task.sleep(for: .milliseconds(50))
+
+        // A local process that doesn't know the nonce must not be able to
+        // kill the sign-in with a fabricated error redirect.
+        let attack = URL(string: "http://127.0.0.1:\(port)/?error=x&state=evil")!
+        let (_, attackResponse) = try await URLSession.shared.data(from: attack)
+        XCTAssertEqual((attackResponse as? HTTPURLResponse)?.statusCode, 404)
+
+        let real = URL(string: "http://127.0.0.1:\(port)/callback?code=c1&state=good")!
+        let (_, response) = try await URLSession.shared.data(from: real)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        let request = try await redirect
+        var query: [String: String] = [:]
+        for item in request.queryItems { query[item.name] = item.value }
+        XCTAssertEqual(query["code"], "c1")
+        await server.stop()
+    }
+
+    func testErrorRedirectGetsNonSuccessPage() async throws {
+        let server = LoopbackRedirectServer()
+        let port = try await server.start()
+        async let redirect = server.awaitRedirect(timeout: 5)
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Consent denial must not be answered with a "Signed in" page.
+        let url = URL(string: "http://127.0.0.1:\(port)/?error=access_denied&state=st")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let body = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(body.contains("not completed"))
+        XCTAssertFalse(body.contains("Signed in"))
+        _ = try await redirect
+        await server.stop()
+    }
+
+    func testRedirectBeforeAwaitIsBuffered() async throws {
+        // The browser can beat awaitRedirect to the port; the buffered
+        // request must be delivered, not dropped.
+        let server = LoopbackRedirectServer()
+        let port = try await server.start()
+        let url = URL(string: "http://127.0.0.1:\(port)/?code=c9&state=st")!
+        _ = try await URLSession.shared.data(from: url)
+
+        let request = try await server.awaitRedirect(timeout: 5)
+        var query: [String: String] = [:]
+        for item in request.queryItems { query[item.name] = item.value }
+        XCTAssertEqual(query["code"], "c9")
+        await server.stop()
+    }
+
     func testTimesOutQuietly() async throws {
         let server = LoopbackRedirectServer()
         _ = try await server.start()
