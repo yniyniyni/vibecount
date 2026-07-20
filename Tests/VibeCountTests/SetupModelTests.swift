@@ -292,6 +292,18 @@ final class SetupModelTests: XCTestCase {
         XCTAssertTrue(model.googleSignInAvailable)
     }
 
+    func testJoinCloudLinkAutoLaunchesGoogleSignIn() async {
+        // Same policy as the welcome-screen cloud path: a successful cloud
+        // commit immediately runs the (required) Google sign-in instead of
+        // stopping at needsGoogleSignIn.
+        let box = Box()
+        let model = makeModel(route: .join, signInResult: .success("a@b.c"), box: box)
+        model.joinText = "vibecount://join?v=1&p=\(DefaultSyncProject.projectID)&k=\(DefaultSyncProject.apiKey)"
+        await model.submitJoin()
+        XCTAssertEqual(model.linkedEmail, "a@b.c")
+        XCTAssertEqual(model.phase, SetupModel.Phase.success)
+    }
+
     func testJoinCloudLinkAlsoRequiresGoogle() async {
         let box = Box()
         let model = makeModel(
