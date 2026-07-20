@@ -237,6 +237,26 @@ final class FirestoreSyncServiceTests: XCTestCase {
         try await service.addFriend(inviteCode: "AAAABBBBCCCCDDDD") // must not throw
     }
 
+    func testStopSyncingCancelsInFlightStart() async throws {
+        await backend.holdSignIn()
+        let inFlight = Task { await service.startSyncing() }
+        // Wait until the start is parked inside signIn.
+        while await backend.calls.isEmpty { await Task.yield() }
+
+        service.stopSyncing()
+        await backend.releaseSignIn()
+        await inFlight.value
+
+        // The cancelled start must not revive the service: a push reports
+        // not-signed-in instead of writing under the torn-down identity.
+        do {
+            try await service.pushLocalUsage(dailyTokens: 1, monthlyTokens: 1)
+            XCTFail("expected notSignedIn")
+        } catch let error as SyncError {
+            XCTAssertEqual(error, .notSignedIn)
+        }
+    }
+
     func testRemoveFriendDeletesRelationshipAndLocalRow() async throws {
         let service = await startedService()
         await backend.setDocument(path: "users/uid-1/friends/friend-1",

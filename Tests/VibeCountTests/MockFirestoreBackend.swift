@@ -8,6 +8,17 @@ actor MockFirestoreBackend: FirestoreBackend {
     private var listResults: [String: [FirestoreDocument]] = [:]
     private var errors: [String: FirestoreClientError] = [:]
     private var signInResult: Result<String, FirestoreClientError> = .success("uid-1")
+    private var signInGate: CheckedContinuation<Void, Never>?
+    private var gateSignIn = false
+
+    /// Parks the next signIn() until releaseSignIn(), so tests can interleave
+    /// service calls with an in-flight start.
+    func holdSignIn() { gateSignIn = true }
+    func releaseSignIn() {
+        signInGate?.resume()
+        signInGate = nil
+        gateSignIn = false
+    }
 
     func setSignIn(_ result: Result<String, FirestoreClientError>) { signInResult = result }
     func setDocument(path: String, fields: [String: FirestoreValue]) {
@@ -24,6 +35,9 @@ actor MockFirestoreBackend: FirestoreBackend {
 
     func signIn() async throws -> String {
         calls.append("signIn")
+        if gateSignIn {
+            await withCheckedContinuation { signInGate = $0 }
+        }
         return try signInResult.get()
     }
 
