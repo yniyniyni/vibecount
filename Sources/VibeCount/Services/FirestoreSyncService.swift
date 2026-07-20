@@ -41,6 +41,10 @@ public final class FirestoreSyncService: SyncService {
     private var started = false
     private var ownUid: String?
     private var startTask: Task<Void, Never>?
+    /// Tags the currently-registered `startTask`, so `startSyncing()` can tell
+    /// after an `await` whether it's still the one that registered it — `Task`
+    /// is a struct, not identity-comparable, so a UUID stands in for `===`.
+    private var startTaskID: UUID?
 
     init(container: ModelContainer, backend: any FirestoreBackend) {
         self.container = container
@@ -59,20 +63,37 @@ public final class FirestoreSyncService: SyncService {
             await inFlight.value
             return
         }
+        let taskID = UUID()
         let task = Task { await self.performStart() }
         startTask = task
+        startTaskID = taskID
         await task.value
-        startTask = nil
+        // A newer start may have already replaced this entry (e.g. this call
+        // was itself the stale caller of a cancelled task) — only clear our
+        // own slot, never a task registered after us.
+        if startTaskID == taskID {
+            startTask = nil
+            startTaskID = nil
+        }
     }
 
     private func performStart() async {
         do {
             let uid = try await backend.signIn()
-            let user = try adoptIdentity(uid: uid)
-            try await registerInviteCode(for: user)
-            try await ensureRemoteUserDoc(for: user)
             // A stopSyncing() (backend switch) that raced this start wins:
-            // never revive a stopped service under a torn-down backend.
+            // never revive a stopped service under a torn-down backend. Checked
+            // repeatedly — not just once before `started = true` — because
+            // adoptIdentity, registerInviteCode, and ensureRemoteUserDoc all do
+            // real damage (identity rewrite, remote writes) under the OLD
+            // backend if allowed to run after a cancellation. `guard` (not
+            // `try Task.checkCancellation()`) so cancellation never falls into
+            // the `catch` below and surfaces as a spurious user-facing error.
+            guard !Task.isCancelled else { return }
+            let user = try adoptIdentity(uid: uid)
+            guard !Task.isCancelled else { return }
+            try await registerInviteCode(for: user)
+            guard !Task.isCancelled else { return }
+            try await ensureRemoteUserDoc(for: user)
             guard !Task.isCancelled else { return }
             started = true
             ownUid = uid
@@ -87,6 +108,11 @@ public final class FirestoreSyncService: SyncService {
 
     public func stopSyncing() {
         startTask?.cancel()
+        // Clear the slot too — otherwise the next startSyncing() sees a
+        // non-nil (but cancelled-and-dead) startTask, awaits it, and returns
+        // without ever starting anything.
+        startTask = nil
+        startTaskID = nil
         started = false
         ownUid = nil
     }

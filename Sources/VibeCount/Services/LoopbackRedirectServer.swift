@@ -65,9 +65,11 @@ actor LoopbackRedirectServer {
         }
         defer { timeoutTask.cancel() }
         return try await withCheckedThrowingContinuation { continuation in
-            // Entering the continuation is a suspension point, so a redirect
-            // can land between the check above and here; deliver it now
-            // instead of parking it in `buffered` past the timeout.
+            // Defensive, not load-bearing today: this closure runs
+            // synchronously on the actor before any suspension, so `handle`
+            // cannot interleave between the check above and here. Re-checking
+            // keeps `awaitRedirect` correct if the buffered check above ever
+            // moves behind an `await`.
             if let buffered {
                 self.buffered = nil
                 continuation.resume(returning: buffered)

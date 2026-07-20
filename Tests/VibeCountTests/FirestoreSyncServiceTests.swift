@@ -257,6 +257,68 @@ final class FirestoreSyncServiceTests: XCTestCase {
         }
     }
 
+    func testCancelledStartDoesNotAdoptIdentityOrWriteRemote() async throws {
+        // Simulate a backend switch that has already adopted a new uid
+        // locally: a cancelled start under the OLD backend must not clobber
+        // it, and must not register an invite code or user doc for it either.
+        context.insert(User(userId: "new-uid", displayName: "Me", inviteCode: InviteCode.generate()))
+        try context.save()
+
+        await backend.holdSignIn()
+        let inFlight = Task { await service.startSyncing() }
+        // Wait until the start is parked inside signIn.
+        while await backend.calls.isEmpty { await Task.yield() }
+
+        service.stopSyncing()
+        await backend.releaseSignIn()
+        await inFlight.value
+
+        let users = try context.fetch(FetchDescriptor<User>())
+        XCTAssertEqual(users.map(\.userId), ["new-uid"],
+                       "a cancelled start must not rewrite the local identity to the old backend's uid")
+
+        let calls = await backend.calls
+        XCTAssertFalse(calls.contains { $0.hasPrefix("create inviteCodes") },
+                       "a cancelled start must not register an invite code under the old backend")
+        let userDoc = await backend.document(path: "users/uid-1")
+        XCTAssertNil(userDoc, "a cancelled start must not create a remote user doc under the old backend")
+    }
+
+    func testStartSyncingAfterStopActuallyStarts() async throws {
+        await backend.holdSignIn()
+        let task1 = Task { await service.startSyncing() }
+        // Wait until the start is parked inside signIn.
+        while await backend.calls.isEmpty { await Task.yield() }
+
+        service.stopSyncing()
+
+        // Mirrors the real repro (VibeCountApp's Google identity recovery:
+        // stopSyncing() immediately followed by startSyncing() while an
+        // earlier background start, e.g. from pushLocalUsage, may still be
+        // winding down). task1 is still parked inside signIn() here — the
+        // gate isn't released yet — so task2's read of the internal start
+        // slot is guaranteed to happen before task1 can possibly finish and
+        // clear it itself.
+        let task2 = Task { await service.startSyncing() }
+        for _ in 0..<5 { await Task.yield() }
+
+        await backend.releaseSignIn()
+        await task1.value
+        await task2.value
+
+        XCTAssertNil(service.status.lastError)
+        // If stopSyncing() left the cancelled task registered, task2 would
+        // have taken the "await the stale task; return" branch and never
+        // called signIn() itself — only task1's single call would show up.
+        let signInCalls = await backend.calls.filter { $0 == "signIn" }
+        XCTAssertEqual(signInCalls.count, 2, "task2 must trigger its own real sign-in, not piggyback on task1's")
+
+        // Confirm the service is genuinely started, not just past the guard.
+        try await service.pushLocalUsage(dailyTokens: 5, monthlyTokens: 5)
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertEqual(rows.first?.friendId, "uid-1")
+    }
+
     func testRemoveFriendDeletesRelationshipAndLocalRow() async throws {
         let service = await startedService()
         await backend.setDocument(path: "users/uid-1/friends/friend-1",

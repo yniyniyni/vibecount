@@ -71,6 +71,12 @@ scripts/build-app.sh release
 
 Stored in-app configuration takes precedence over the bundled plist.
 
+Deployed rules are not kept in sync automatically: after editing
+`firestore.rules`, republish it from the Firebase console (Firestore
+Database → Rules) on every project using it, including the shared VibeCount
+cloud project. There's no way to tell from this repository alone whether a
+given deployment's rules match the current file.
+
 ## Development
 
 Run the Swift test suite:

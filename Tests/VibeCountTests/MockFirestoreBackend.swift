@@ -8,16 +8,20 @@ actor MockFirestoreBackend: FirestoreBackend {
     private var listResults: [String: [FirestoreDocument]] = [:]
     private var errors: [String: FirestoreClientError] = [:]
     private var signInResult: Result<String, FirestoreClientError> = .success("uid-1")
-    private var signInGate: CheckedContinuation<Void, Never>?
+    private var signInGates: [CheckedContinuation<Void, Never>] = []
     private var gateSignIn = false
 
-    /// Parks the next signIn() until releaseSignIn(), so tests can interleave
-    /// service calls with an in-flight start.
+    /// Parks every signIn() until releaseSignIn(), so tests can interleave
+    /// service calls with in-flight starts. Holds a list, not one slot: a
+    /// second concurrently-gated start would otherwise overwrite the first
+    /// one's continuation, stranding that task forever (cancellation does
+    /// not resume a withCheckedContinuation).
     func holdSignIn() { gateSignIn = true }
     func releaseSignIn() {
-        signInGate?.resume()
-        signInGate = nil
+        let gates = signInGates
+        signInGates.removeAll()
         gateSignIn = false
+        for gate in gates { gate.resume() }
     }
 
     func setSignIn(_ result: Result<String, FirestoreClientError>) { signInResult = result }
@@ -36,7 +40,7 @@ actor MockFirestoreBackend: FirestoreBackend {
     func signIn() async throws -> String {
         calls.append("signIn")
         if gateSignIn {
-            await withCheckedContinuation { signInGate = $0 }
+            await withCheckedContinuation { signInGates.append($0) }
         }
         return try signInResult.get()
     }

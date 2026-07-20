@@ -82,6 +82,12 @@ final class AuthSessionStoreTests: XCTestCase {
         let dotted = AuthSessionStore(directory: directory, projectID: "my.project")
         let plain = AuthSessionStore(directory: directory, projectID: "myproject")
         XCTAssertNotEqual(dotted.fileURL, plain.fileURL)
+        // "%" is the character that makes the encoding reversible/injective —
+        // if it weren't itself percent-encoded, an id containing a literal
+        // "%2F" would collide with an id containing a literal "/".
+        let literalPercent = AuthSessionStore(directory: directory, projectID: "a%2Fb")
+        let literalSlash = AuthSessionStore(directory: directory, projectID: "a/b")
+        XCTAssertNotEqual(literalPercent.fileURL, literalSlash.fileURL)
     }
 
     func testAdoptLegacySessionMovesFileOnce() throws {
