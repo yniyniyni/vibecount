@@ -39,8 +39,15 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         let isoPlainFormatter = ISO8601DateFormatter()
         isoPlainFormatter.formatOptions = [.withInternetDateTime]
 
-        var totalDaily = 0
-        var totalMonthly = 0
+        // De-duplicate assistant rows GLOBALLY by "<messageId>:<requestId>":
+        // forked/continued sessions copy history rows into new JSONL files, so
+        // the same turn can appear in several files and must count once. Daily
+        // and monthly keep separate maps because a row can qualify for monthly
+        // but not today.
+        var dailyKeyed: [String: Int] = [:]
+        var dailyUnkeyed = 0
+        var monthlyKeyed: [String: Int] = [:]
+        var monthlyUnkeyed = 0
 
         // Single pass computes both totals. Monthly covers the trailing
         // 30 days; today's rows are a subset of it, so each line is classified
@@ -49,18 +56,22 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             try Task.checkCancellation()
             await Task.yield()
 
-            let (daily, monthly) = try scanFile(
+            try scanFile(
                 at: url,
                 startOfToday: startOfToday,
                 startOf30Days: startOf30Days,
                 isoFormatter: isoFormatter,
-                isoPlainFormatter: isoPlainFormatter
+                isoPlainFormatter: isoPlainFormatter,
+                dailyKeyed: &dailyKeyed,
+                dailyUnkeyed: &dailyUnkeyed,
+                monthlyKeyed: &monthlyKeyed,
+                monthlyUnkeyed: &monthlyUnkeyed
             )
-            totalDaily += daily
-            totalMonthly += monthly
         }
 
-        return DailyMonthlyUsage(daily: totalDaily, monthly: totalMonthly)
+        return DailyMonthlyUsage(
+            daily: dailyKeyed.values.reduce(0, +) + dailyUnkeyed,
+            monthly: monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed)
     }
 
     /// Synchronous directory walk — `DirectoryEnumerator` iteration is marked
@@ -98,8 +109,12 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         startOfToday: Date,
         startOf30Days: Date,
         isoFormatter: ISO8601DateFormatter,
-        isoPlainFormatter: ISO8601DateFormatter
-    ) throws -> (daily: Int, monthly: Int) {
+        isoPlainFormatter: ISO8601DateFormatter,
+        dailyKeyed: inout [String: Int],
+        dailyUnkeyed: inout Int,
+        monthlyKeyed: inout [String: Int],
+        monthlyUnkeyed: inout Int
+    ) throws {
         let reader: LineReader
         do {
             reader = try LineReader(url: url)
@@ -107,16 +122,9 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             // Session files can vanish or be locked mid-scan; skip this file
             // rather than failing the whole poll (same semantics the previous
             // whole-file read had for unreadable files).
-            return (0, 0)
+            return
         }
 
-        // De-duplicate assistant rows per file by "<messageId>:<requestId>" so
-        // streamed/retried turns aren't double-counted. Daily and monthly keep
-        // separate maps because a row can qualify for monthly but not today.
-        var dailyKeyed: [String: Int] = [:]
-        var dailyUnkeyed = 0
-        var monthlyKeyed: [String: Int] = [:]
-        var monthlyUnkeyed = 0
         var linesSinceCancellationCheck = 0
 
         while true {
@@ -171,10 +179,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 }
             }
         }
-
-        let daily = dailyKeyed.values.reduce(0, +) + dailyUnkeyed
-        let monthly = monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed
-        return (daily, monthly)
     }
 }
 

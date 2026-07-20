@@ -154,9 +154,10 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 40)
     }
 
-    func testDeduplicationIsPerFile() async throws {
-        // The same key in two different files is counted once per file — documents
-        // the intentional per-file (not global) de-duplication.
+    func testDeduplicationIsGlobalAcrossFiles() async throws {
+        // Forked/continued sessions copy history rows into new JSONL files, so
+        // the same messageId:requestId can appear in several files — it must
+        // count once, not once per file.
         try writeSession(project: "a", lines: [
             assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 100)
         ])
@@ -164,8 +165,8 @@ final class ClaudeUsageMonitorTests: XCTestCase {
             assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 100)
         ])
         let usage = try await fetch()
-        XCTAssertEqual(usage.daily, 200)
-        XCTAssertEqual(usage.monthly, 200)
+        XCTAssertEqual(usage.daily, 100, "Same key in two files must be counted once")
+        XCTAssertEqual(usage.monthly, 100)
     }
 
     func testPreCancelledFetchThrowsCancellation() async throws {
