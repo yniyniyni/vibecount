@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/LocalOnlySyncService.swift
 import Foundation
 import SwiftData
 import os
@@ -18,7 +17,7 @@ public final class LocalOnlySyncService: SyncService {
     }
 
     public func startSyncing() async {
-        // Nothing to listen to; just drop leaderboard rows that cannot be
+        // Nothing to sync; just drop leaderboard rows that cannot be
         // maintained without sync (old friends, mock data, stale identities).
         do {
             var keep = Set<String>()

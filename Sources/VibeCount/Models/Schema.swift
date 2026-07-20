@@ -1,4 +1,3 @@
-// Sources/VibeCount/Models/Schema.swift
 import Foundation
 import SwiftData
 

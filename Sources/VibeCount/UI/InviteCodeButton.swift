@@ -1,4 +1,3 @@
-// Sources/VibeCount/UI/InviteCodeButton.swift
 import SwiftUI
 import AppKit
 

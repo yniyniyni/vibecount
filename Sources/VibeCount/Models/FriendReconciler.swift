@@ -1,4 +1,3 @@
-// Sources/VibeCount/Models/FriendReconciler.swift
 import Foundation
 import SwiftData
 

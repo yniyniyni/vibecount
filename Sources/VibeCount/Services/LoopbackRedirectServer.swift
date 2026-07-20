@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/LoopbackRedirectServer.swift
 import Foundation
 import Network
 
