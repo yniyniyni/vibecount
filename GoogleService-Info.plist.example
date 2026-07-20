@@ -17,7 +17,7 @@
       →  "GoogleService-Info.plist"  →  Download
 
   Without a real GoogleService-Info.plist the app still builds and runs, but
-  it falls back to MockSyncService (no cross-device leaderboard sync).
+  it falls back to local-only mode (no cross-device leaderboard sync).
 
   BUNDLE_ID / PROJECT_ID below are the shared project's public identifiers and
   can stay as-is when connecting to the existing backend.

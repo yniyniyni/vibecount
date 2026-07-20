@@ -31,8 +31,9 @@ enum GoogleLinkOutcome: Equatable, Sendable {
     case recovered(uid: String, email: String?)
 }
 
-/// Minimal Identity Toolkit + Firestore REST client. Anonymous auth with a
-/// file-persisted refresh token; document operations added in Task 4.
+/// Minimal Identity Toolkit + Firestore REST client: anonymous auth with a
+/// file-persisted refresh token, plus the document operations the sync
+/// service needs.
 actor FirestoreClient {
     private let config: FirebaseConfig
     private let store: AuthSessionStore

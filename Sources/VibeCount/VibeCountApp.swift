@@ -80,20 +80,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             }
         }
 
-        // Listen for dashboard actions posted from SwiftUI
         NotificationCenter.default.addObserver(self, selector: #selector(addFriend), name: NSNotification.Name("AddFriend"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(removeFriend(_:)), name: NSNotification.Name("RemoveFriend"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(manualRefresh), name: NSNotification.Name("RefreshData"), object: nil)
 
-        // Start polling usage
         updateTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pollUsage()
             }
         }
 
-        // Establish sync (identity + listeners) first so the first poll can
-        // push under the authenticated identity, then poll immediately.
+        // Establish sync (identity) first so the first poll can push under
+        // the authenticated identity, then poll immediately.
         Task { @MainActor [weak self] in
             await self?.syncService?.startSyncing()
             self?.pollUsage()
@@ -187,7 +185,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         inputTextField.placeholderString = "e.g. ABCD-EFGH-2345-6789"
         alert.accessoryView = inputTextField
 
-        // Show window and bring to front
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }

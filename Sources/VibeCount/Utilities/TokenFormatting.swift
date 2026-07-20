@@ -1,4 +1,3 @@
-// Sources/VibeCount/Utilities/TokenFormatting.swift
 import Foundation
 
 extension Int {

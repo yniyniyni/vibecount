@@ -1,4 +1,3 @@
-// Sources/VibeCount/Utilities/View+PointingHandCursor.swift
 import SwiftUI
 import AppKit
 

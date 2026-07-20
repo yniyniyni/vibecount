@@ -1,4 +1,3 @@
-// Sources/VibeCount/Models/Friend+Upsert.swift
 import Foundation
 import SwiftData
 

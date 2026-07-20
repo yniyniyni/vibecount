@@ -1,4 +1,3 @@
-// Sources/VibeCount/Utilities/Clipboard.swift
 import AppKit
 
 /// Thin wrapper around `NSPasteboard` so copy behavior can be unit-tested

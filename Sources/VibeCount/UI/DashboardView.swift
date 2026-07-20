@@ -1,4 +1,3 @@
-// Sources/VibeCount/UI/DashboardView.swift
 import SwiftUI
 import SwiftData
 

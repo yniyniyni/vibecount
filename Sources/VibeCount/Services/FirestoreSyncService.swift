@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/FirestoreSyncService.swift
 import Foundation
 import SwiftData
 import os

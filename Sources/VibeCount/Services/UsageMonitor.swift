@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/UsageMonitor.swift
 import Foundation
 
 /// Daily and 30-day rolling token totals, computed together in a single pass.
@@ -22,7 +21,6 @@ public final class MockUsageMonitor: UsageMonitor {
     public init() {}
 
     public func fetchUsage() async throws -> DailyMonthlyUsage {
-        // Simulates network/CLI delay
         try await Task.sleep(nanoseconds: 500_000_000)
         return DailyMonthlyUsage(daily: 15000, monthly: 250000)
     }
