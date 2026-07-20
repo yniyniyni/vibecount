@@ -171,8 +171,13 @@ public struct ClaudeUsageMonitor: UsageMonitor {
 
                 if let messageId = messageId, let requestId = requestId {
                     let key = "\(messageId):\(requestId)"
-                    monthlyKeyed[key] = lineTokens
-                    if isToday { dailyKeyed[key] = lineTokens }
+                    // Keep the max, not the last write: `FileManager.enumerator`
+                    // ordering isn't guaranteed stable, so with a cross-file
+                    // duplicate (e.g. one copy truncated mid-stream) last-write-wins
+                    // would make the total depend on enumeration order and could
+                    // flicker between polls.
+                    monthlyKeyed[key] = max(monthlyKeyed[key] ?? 0, lineTokens)
+                    if isToday { dailyKeyed[key] = max(dailyKeyed[key] ?? 0, lineTokens) }
                 } else {
                     monthlyUnkeyed += lineTokens
                     if isToday { dailyUnkeyed += lineTokens }

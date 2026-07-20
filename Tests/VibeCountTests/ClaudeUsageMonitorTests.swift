@@ -169,6 +169,22 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 100)
     }
 
+    func testDeduplicationKeepsMaxRegardlessOfFileOrder() async throws {
+        // A truncated/partially-streamed copy of a row could otherwise win
+        // last-write-wins dedup depending on FileManager.enumerator's
+        // (unspecified) ordering. Keeping the max makes the result
+        // independent of that order in both directions.
+        try writeSession(project: "a-smaller-first", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 40)
+        ])
+        try writeSession(project: "z-larger-second", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 100)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.daily, 100, "the larger duplicate value must win")
+        XCTAssertEqual(usage.monthly, 100)
+    }
+
     func testPreCancelledFetchThrowsCancellation() async throws {
         try writeSession(project: "p", lines: [
             assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1", output: 100)

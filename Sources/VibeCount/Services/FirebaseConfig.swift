@@ -56,6 +56,9 @@ struct AuthSessionStore: Sendable {
     private static func encodeForFileName(_ projectID: String) -> String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-")
+        // The `?? projectID` fallback is unreachable in practice:
+        // addingPercentEncoding only returns nil for a receiver that isn't
+        // valid UTF-8, and a native Swift String can't hold invalid UTF-8.
         return projectID.addingPercentEncoding(withAllowedCharacters: allowed) ?? projectID
     }
 
