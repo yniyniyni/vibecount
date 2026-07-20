@@ -25,10 +25,14 @@ service cloud.firestore {
         && d.displayName is string
         && d.displayName.size() >= 1
         && d.displayName.size() <= 50
+        // Caps are far beyond any real usage; they exist so a modified
+        // client can't post Int64.max-style leaderboard flexes.
         && d.latestDailyTokens is int
         && d.latestDailyTokens >= 0
+        && d.latestDailyTokens <= 1000000000000
         && d.latestMonthlyTokens is int
         && d.latestMonthlyTokens >= 0
+        && d.latestMonthlyTokens <= 30000000000000
         && d.lastUpdated is timestamp;
     }
 

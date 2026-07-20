@@ -150,6 +150,16 @@ describe('users: owner writes', () => {
       }),
     );
   });
+
+  it('allows values exactly at the caps', async () => {
+    await assertSucceeds(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestDailyTokens: 1_000_000_000_000,
+        latestMonthlyTokens: 30_000_000_000_000,
+      }),
+    );
+  });
 });
 
 describe('users: malformed owner writes are denied', () => {
@@ -193,6 +203,24 @@ describe('users: malformed owner writes are denied', () => {
   it('denies negative latestMonthlyTokens', async () => {
     await assertFails(
       setDoc(doc(alice(), 'users/alice'), { ...validUserDoc(), latestMonthlyTokens: -5 }),
+    );
+  });
+
+  it('denies latestDailyTokens above the 1e12 cap', async () => {
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestDailyTokens: 1_000_000_000_001,
+      }),
+    );
+  });
+
+  it('denies latestMonthlyTokens above the 3e13 cap', async () => {
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestMonthlyTokens: 30_000_000_000_001,
+      }),
     );
   });
 
