@@ -70,9 +70,18 @@ final class AuthSessionStoreTests: XCTestCase {
         XCTAssertEqual(projectA.load(), StoredAuthSession(uid: "ua", refreshToken: "ra"))
     }
 
-    func testProjectIDIsSanitizedForFileName() {
+    func testProjectIDIsEncodedInjectivelyForFileName() {
+        // Plain Firebase-style ids keep their pre-existing file names.
+        XCTAssertEqual(
+            AuthSessionStore(directory: directory, projectID: "proj-a").fileURL.lastPathComponent,
+            "firebase-auth-proj-a.json")
+        // Hostile characters are percent-encoded, not dropped.
         let odd = AuthSessionStore(directory: directory, projectID: "p/../x y")
-        XCTAssertEqual(odd.fileURL.lastPathComponent, "firebase-auth-pxy.json")
+        XCTAssertEqual(odd.fileURL.lastPathComponent, "firebase-auth-p%2F%2E%2E%2Fx%20y.json")
+        // Distinct project ids can never collide onto one session file.
+        let dotted = AuthSessionStore(directory: directory, projectID: "my.project")
+        let plain = AuthSessionStore(directory: directory, projectID: "myproject")
+        XCTAssertNotEqual(dotted.fileURL, plain.fileURL)
     }
 
     func testAdoptLegacySessionMovesFileOnce() throws {
