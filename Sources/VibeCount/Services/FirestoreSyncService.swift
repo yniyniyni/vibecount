@@ -72,6 +72,9 @@ public final class FirestoreSyncService: SyncService {
             let user = try adoptIdentity(uid: uid)
             try await registerInviteCode(for: user)
             try await ensureRemoteUserDoc(for: user)
+            // A stopSyncing() (backend switch) that raced this start wins:
+            // never revive a stopped service under a torn-down backend.
+            guard !Task.isCancelled else { return }
             started = true
             ownUid = uid
             status.lastError = nil
@@ -84,6 +87,7 @@ public final class FirestoreSyncService: SyncService {
     }
 
     public func stopSyncing() {
+        startTask?.cancel()
         started = false
         ownUid = nil
     }
