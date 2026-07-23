@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/FirestoreSyncService.swift
 import Foundation
 import SwiftData
 import os
@@ -42,6 +41,10 @@ public final class FirestoreSyncService: SyncService {
     private var started = false
     private var ownUid: String?
     private var startTask: Task<Void, Never>?
+    /// Tags the currently-registered `startTask`, so `startSyncing()` can tell
+    /// after an `await` whether it's still the one that registered it — `Task`
+    /// is a struct, not identity-comparable, so a UUID stands in for `===`.
+    private var startTaskID: UUID?
 
     init(container: ModelContainer, backend: any FirestoreBackend) {
         self.container = container
@@ -60,30 +63,62 @@ public final class FirestoreSyncService: SyncService {
             await inFlight.value
             return
         }
+        let taskID = UUID()
         let task = Task { await self.performStart() }
         startTask = task
+        startTaskID = taskID
         await task.value
-        startTask = nil
+        // A newer start may have already replaced this entry (e.g. this call
+        // was itself the stale caller of a cancelled task) — only clear our
+        // own slot, never a task registered after us.
+        if startTaskID == taskID {
+            startTask = nil
+            startTaskID = nil
+        }
     }
 
     private func performStart() async {
         do {
             let uid = try await backend.signIn()
+            // A stopSyncing() (backend switch) that raced this start wins:
+            // never revive a stopped service under a torn-down backend. Checked
+            // repeatedly — not just once before `started = true` — because
+            // adoptIdentity, registerInviteCode, and ensureRemoteUserDoc all do
+            // real damage (identity rewrite, remote writes) under the OLD
+            // backend if allowed to run after a cancellation. `guard` (not
+            // `try Task.checkCancellation()`) so a cancellation noticed here
+            // returns quietly rather than routing through the `catch` below.
+            guard !Task.isCancelled else { return }
             let user = try adoptIdentity(uid: uid)
+            guard !Task.isCancelled else { return }
             try await registerInviteCode(for: user)
+            guard !Task.isCancelled else { return }
             try await ensureRemoteUserDoc(for: user)
+            guard !Task.isCancelled else { return }
             started = true
             ownUid = uid
             status.lastError = nil
             logger.info("Sync started")
             await refreshLeaderboard()
         } catch {
+            // The guards above only run between awaits — a cancellation that
+            // lands while parked inside one is thrown out of it instead
+            // (URLSession reports it as URLError.cancelled, not
+            // CancellationError). A user asking to stop isn't a sync failure,
+            // so it must not paint the dashboard's warning banner.
+            if Task.isCancelled { return }
             logger.error("Sync start failed: \(error, privacy: .public)")
             status.lastError = "Sync isn't available: \(error.localizedDescription)"
         }
     }
 
     public func stopSyncing() {
+        startTask?.cancel()
+        // Clear the slot too — otherwise the next startSyncing() sees a
+        // non-nil (but cancelled-and-dead) startTask, awaits it, and returns
+        // without ever starting anything.
+        startTask = nil
+        startTaskID = nil
         started = false
         ownUid = nil
     }

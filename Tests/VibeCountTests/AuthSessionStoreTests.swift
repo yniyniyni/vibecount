@@ -70,9 +70,24 @@ final class AuthSessionStoreTests: XCTestCase {
         XCTAssertEqual(projectA.load(), StoredAuthSession(uid: "ua", refreshToken: "ra"))
     }
 
-    func testProjectIDIsSanitizedForFileName() {
+    func testProjectIDIsEncodedInjectivelyForFileName() {
+        // Plain Firebase-style ids keep their pre-existing file names.
+        XCTAssertEqual(
+            AuthSessionStore(directory: directory, projectID: "proj-a").fileURL.lastPathComponent,
+            "firebase-auth-proj-a.json")
+        // Hostile characters are percent-encoded, not dropped.
         let odd = AuthSessionStore(directory: directory, projectID: "p/../x y")
-        XCTAssertEqual(odd.fileURL.lastPathComponent, "firebase-auth-pxy.json")
+        XCTAssertEqual(odd.fileURL.lastPathComponent, "firebase-auth-p%2F%2E%2E%2Fx%20y.json")
+        // Distinct project ids can never collide onto one session file.
+        let dotted = AuthSessionStore(directory: directory, projectID: "my.project")
+        let plain = AuthSessionStore(directory: directory, projectID: "myproject")
+        XCTAssertNotEqual(dotted.fileURL, plain.fileURL)
+        // "%" is the character that makes the encoding reversible/injective —
+        // if it weren't itself percent-encoded, an id containing a literal
+        // "%2F" would collide with an id containing a literal "/".
+        let literalPercent = AuthSessionStore(directory: directory, projectID: "a%2Fb")
+        let literalSlash = AuthSessionStore(directory: directory, projectID: "a/b")
+        XCTAssertNotEqual(literalPercent.fileURL, literalSlash.fileURL)
     }
 
     func testAdoptLegacySessionMovesFileOnce() throws {

@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/SyncConfigStore.swift
 import Foundation
 
 /// User-chosen sync backend, entered through the setup GUI. Takes precedence

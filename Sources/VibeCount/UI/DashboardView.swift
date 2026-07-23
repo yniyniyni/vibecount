@@ -1,4 +1,3 @@
-// Sources/VibeCount/UI/DashboardView.swift
 import SwiftUI
 import SwiftData
 
@@ -100,13 +99,7 @@ public struct DashboardView: View {
                 .keyboardShortcut("r", modifiers: .command)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .onHover { isHovered in
-                    if isHovered {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+                .pointingHandCursor()
 
                 Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("OpenSyncSettings"), object: nil)
@@ -121,13 +114,7 @@ public struct DashboardView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .onHover { isHovered in
-                    if isHovered {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+                .pointingHandCursor()
 
                 Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("AddFriend"), object: nil)
@@ -144,13 +131,7 @@ public struct DashboardView: View {
                 .keyboardShortcut("a", modifiers: .command)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .onHover { isHovered in
-                    if isHovered {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+                .pointingHandCursor()
 
                 Button(action: {
                     NSApplication.shared.terminate(nil)
@@ -168,13 +149,7 @@ public struct DashboardView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .padding(.bottom, 8)
-                .onHover { isHovered in
-                    if isHovered {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+                .pointingHandCursor()
             }
             .padding(.vertical, 8)
         }

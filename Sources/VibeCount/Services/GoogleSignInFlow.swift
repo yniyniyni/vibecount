@@ -26,6 +26,7 @@ struct GoogleSignInFlow {
         let redirectURI = "http://127.0.0.1:\(port)"
         let pkce = PKCE.generate()
         let state = UUID().uuidString
+        await server.expect(state: state)
         openURL(GoogleOAuth.authorizeURL(
             clientID: clientID, redirectURI: redirectURI,
             challenge: pkce.challenge, state: state))

@@ -1,4 +1,3 @@
-// Sources/VibeCount/Utilities/InviteCode.swift
 import Foundation
 
 /// High-entropy invite codes: 16 characters from the Crockford base32 alphabet

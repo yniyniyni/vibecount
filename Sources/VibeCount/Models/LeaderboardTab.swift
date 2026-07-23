@@ -1,4 +1,3 @@
-// Sources/VibeCount/Models/LeaderboardTab.swift
 import Foundation
 
 /// The two leaderboard views. Each tab sorts by the same figure it displays,

@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/SyncService.swift
 import Foundation
 import Observation
 
@@ -59,11 +58,11 @@ public final class SyncStatus {
 public protocol SyncService: AnyObject {
     var status: SyncStatus { get }
 
-    /// Establish identity and listeners. Idempotent — safe to call repeatedly,
-    /// so a launch without network heals itself on a later poll.
+    /// Establish identity and remote presence. Idempotent — safe to call
+    /// repeatedly, so a launch without network heals itself on a later poll.
     func startSyncing() async
 
-    /// Tear down all listeners. Idempotent.
+    /// Stop syncing (cancelling any in-flight start). Idempotent.
     func stopSyncing()
 
     /// Persist the local user's usage locally and (when syncing) remotely.

@@ -1,4 +1,3 @@
-// Sources/VibeCount/Services/GoogleOAuth.swift
 import Foundation
 import CryptoKit
 

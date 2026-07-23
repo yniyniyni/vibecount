@@ -159,7 +159,8 @@ final class SetupModel {
             await validateAndCommit(config)
             // Joining the shared cloud also requires Google (same policy as
             // the welcome "Use VibeCount cloud" path).
-            if phase == .success, DefaultSyncProject.matches(currentConfig) {
+            if phase == .success || phase == .needsGoogleSignIn,
+               DefaultSyncProject.matches(currentConfig) {
                 await signInWithGoogle()
                 if linkedEmail == nil {
                     phase = .needsGoogleSignIn
