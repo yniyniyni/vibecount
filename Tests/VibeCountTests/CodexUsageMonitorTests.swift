@@ -37,21 +37,32 @@ final class CodexUsageMonitorTests: XCTestCase {
     }
 
     /// A Codex `token_count` event line, matching the real rollout schema:
-    /// top-level `timestamp`, `payload.type == "token_count"`, and the per-turn
-    /// delta at `payload.info.last_token_usage.total_tokens`.
-    private func tokenCountLine(timestamp: String, lastTotalTokens: Int) -> String {
+    /// `input_tokens` includes cached, `total_tokens = input + output`.
+    private func tokenCountLine(timestamp: String, inputTokens: Int,
+                               cachedInputTokens: Int = 0, outputTokens: Int = 0) -> String {
         let root: [String: Any] = [
             "timestamp": timestamp,
             "type": "event_msg",
             "payload": [
                 "type": "token_count",
                 "info": [
-                    "last_token_usage": ["total_tokens": lastTotalTokens]
+                    "last_token_usage": [
+                        "input_tokens": inputTokens,
+                        "cached_input_tokens": cachedInputTokens,
+                        "output_tokens": outputTokens,
+                        "total_tokens": inputTokens + outputTokens,
+                    ]
                 ]
             ]
         ]
         let data = try! JSONSerialization.data(withJSONObject: root)
         return String(data: data, encoding: .utf8)!
+    }
+
+    /// Convenience for tests that only care about the total: a whole turn of
+    /// uncached input (output 0), so `total = input`.
+    private func tokenCountLine(timestamp: String, lastTotalTokens: Int) -> String {
+        tokenCountLine(timestamp: timestamp, inputTokens: lastTotalTokens)
     }
 
     /// A record that carries the session's active model at `payload.model`,
@@ -180,6 +191,20 @@ final class CodexUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 140)
         XCTAssertEqual(usage.byModel["gpt-5-codex"], 100)          // no 5.6 prefix → raw passthrough
         XCTAssertEqual(usage.byModel["GPT 5.6 Terra"], 40)         // gpt-5.6-terra → friendly label
+    }
+
+    func testPreservesInputCachedAndOutputCategories() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        try writeRollout(subpath: "sessions/cat", lines: [
+            modelLine(timestamp: timestamp(daysBeforeToday: 0), model: "gpt-5.6-sol"),
+            // input 1000 (incl 600 cached), output 50 → uncached 400, cached 600, output 50
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 0),
+                           inputTokens: 1000, cachedInputTokens: 600, outputTokens: 50)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.breakdowns(on: today)["GPT 5.6 Sol"],
+                       TokenBreakdown(uncachedInput: 400, cachedInput: 600, cacheWrite: 0, output: 50))
+        XCTAssertEqual(usage.byModel["GPT 5.6 Sol"], 1050)   // total = input + output
     }
 
     func testMissingDirectoryReturnsZero() async throws {
