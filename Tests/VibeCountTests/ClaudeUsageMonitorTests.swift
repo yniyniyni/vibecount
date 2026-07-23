@@ -75,7 +75,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
-    private func fetch() async throws -> DailyMonthlyUsage {
+    private func fetch() async throws -> UsageBreakdown {
         try await ClaudeUsageMonitor(projectsURL: projectsDir).fetchUsage()
     }
 
@@ -191,7 +191,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         ])
         let monitor = ClaudeUsageMonitor(projectsURL: projectsDir)
 
-        let task = Task { () -> DailyMonthlyUsage in
+        let task = Task { () -> UsageBreakdown in
             // Deterministic: don't start scanning until cancellation has landed.
             while !Task.isCancelled { await Task.yield() }
             return try await monitor.fetchUsage()

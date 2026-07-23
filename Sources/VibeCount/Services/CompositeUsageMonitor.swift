@@ -1,7 +1,7 @@
 import Foundation
 
 /// Combines several `UsageMonitor`s into one total. Children run sequentially
-/// (each is I/O-light and yields cooperatively) and their `DailyMonthlyUsage`
+/// (each is I/O-light and yields cooperatively) and their `UsageBreakdown`
 /// values are summed element-wise.
 ///
 /// Best-effort: a child that throws a non-cancellation error contributes zero
@@ -15,12 +15,12 @@ public struct CompositeUsageMonitor: UsageMonitor {
         self.monitors = monitors
     }
 
-    public func fetchUsage() async throws -> DailyMonthlyUsage {
+    public func fetchUsage() async throws -> UsageBreakdown {
         var daily = 0
         var monthly = 0
 
         for monitor in monitors {
-            let usage: DailyMonthlyUsage
+            let usage: UsageBreakdown
             do {
                 usage = try await monitor.fetchUsage()
             } catch is CancellationError {
@@ -32,6 +32,6 @@ public struct CompositeUsageMonitor: UsageMonitor {
             monthly += usage.monthly
         }
 
-        return DailyMonthlyUsage(daily: daily, monthly: monthly)
+        return UsageBreakdown(daily: daily, monthly: monthly)
     }
 }

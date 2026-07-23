@@ -2,17 +2,17 @@ import XCTest
 @testable import VibeCount
 
 private struct StubMonitor: UsageMonitor {
-    let usage: DailyMonthlyUsage
-    func fetchUsage() async throws -> DailyMonthlyUsage { usage }
+    let usage: UsageBreakdown
+    func fetchUsage() async throws -> UsageBreakdown { usage }
 }
 
 private struct ThrowingMonitor: UsageMonitor {
     struct Boom: Error {}
-    func fetchUsage() async throws -> DailyMonthlyUsage { throw Boom() }
+    func fetchUsage() async throws -> UsageBreakdown { throw Boom() }
 }
 
 private struct CancellingMonitor: UsageMonitor {
-    func fetchUsage() async throws -> DailyMonthlyUsage {
+    func fetchUsage() async throws -> UsageBreakdown {
         throw CancellationError()
     }
 }
@@ -20,8 +20,8 @@ private struct CancellingMonitor: UsageMonitor {
 final class CompositeUsageMonitorTests: XCTestCase {
     func testSumsChildTotals() async throws {
         let composite = CompositeUsageMonitor([
-            StubMonitor(usage: DailyMonthlyUsage(daily: 30, monthly: 300)),
-            StubMonitor(usage: DailyMonthlyUsage(daily: 15, monthly: 150))
+            StubMonitor(usage: UsageBreakdown(daily: 30, monthly: 300)),
+            StubMonitor(usage: UsageBreakdown(daily: 15, monthly: 150))
         ])
         let usage = try await composite.fetchUsage()
         XCTAssertEqual(usage.daily, 45)
@@ -30,7 +30,7 @@ final class CompositeUsageMonitorTests: XCTestCase {
 
     func testFailingChildCountsAsZero() async throws {
         let composite = CompositeUsageMonitor([
-            StubMonitor(usage: DailyMonthlyUsage(daily: 30, monthly: 300)),
+            StubMonitor(usage: UsageBreakdown(daily: 30, monthly: 300)),
             ThrowingMonitor()
         ])
         let usage = try await composite.fetchUsage()
@@ -40,7 +40,7 @@ final class CompositeUsageMonitorTests: XCTestCase {
 
     func testCancellationPropagates() async throws {
         let composite = CompositeUsageMonitor([
-            StubMonitor(usage: DailyMonthlyUsage(daily: 30, monthly: 300)),
+            StubMonitor(usage: UsageBreakdown(daily: 30, monthly: 300)),
             CancellingMonitor()
         ])
         do {
