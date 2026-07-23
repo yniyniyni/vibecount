@@ -18,6 +18,8 @@ public struct CompositeUsageMonitor: UsageMonitor {
     public func fetchUsage() async throws -> UsageBreakdown {
         var daily = 0
         var monthly = 0
+        var byDay: [Date: Int] = [:]
+        var byModel: [String: Int] = [:]
 
         for monitor in monitors {
             let usage: UsageBreakdown
@@ -26,12 +28,14 @@ public struct CompositeUsageMonitor: UsageMonitor {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                continue // best-effort: this source contributes zero
+                continue // best-effort: this source contributes an empty breakdown
             }
             daily += usage.daily
             monthly += usage.monthly
+            byDay.merge(usage.byDay, uniquingKeysWith: +)
+            byModel.merge(usage.byModel, uniquingKeysWith: +)
         }
 
-        return UsageBreakdown(daily: daily, monthly: monthly)
+        return UsageBreakdown(daily: daily, monthly: monthly, byDay: byDay, byModel: byModel)
     }
 }

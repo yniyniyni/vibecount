@@ -56,4 +56,21 @@ final class CompositeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.daily, 0)
         XCTAssertEqual(usage.monthly, 0)
     }
+
+    func testMergesByDayAndByModelAcrossChildren() async throws {
+        let day = Calendar.current.startOfDay(for: Date())
+        let composite = CompositeUsageMonitor([
+            StubMonitor(usage: UsageBreakdown(daily: 10, monthly: 10,
+                                              byDay: [day: 10], byModel: ["Opus": 10])),
+            StubMonitor(usage: UsageBreakdown(daily: 5, monthly: 20,
+                                              byDay: [day: 5], byModel: ["Opus": 5, "Codex": 20]))
+        ])
+        let usage = try await composite.fetchUsage()
+
+        XCTAssertEqual(usage.daily, 15)
+        XCTAssertEqual(usage.monthly, 30)
+        XCTAssertEqual(usage.byDay[day], 15)
+        XCTAssertEqual(usage.byModel["Opus"], 15)
+        XCTAssertEqual(usage.byModel["Codex"], 20)
+    }
 }
