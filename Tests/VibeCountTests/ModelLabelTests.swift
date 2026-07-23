@@ -6,6 +6,13 @@ final class ModelLabelTests: XCTestCase {
         XCTAssertEqual(ModelLabel.from("claude-opus-4-20250514"), "Opus")
         XCTAssertEqual(ModelLabel.from("claude-sonnet-4-5-20250929"), "Sonnet")
         XCTAssertEqual(ModelLabel.from("claude-haiku-4-5-20251001"), "Haiku")
+        XCTAssertEqual(ModelLabel.from("claude-fable-5"), "Fable")
+    }
+
+    func testGpt56VariantsGetFriendlyLabels() {
+        XCTAssertEqual(ModelLabel.from("gpt-5.6-sol"), "GPT 5.6 Sol")
+        XCTAssertEqual(ModelLabel.from("gpt-5.6-terra"), "GPT 5.6 Terra")
+        XCTAssertEqual(ModelLabel.from("gpt-5.6-luna"), "GPT 5.6 Luna")
     }
 
     func testUnknownIdPassesThroughUnchanged() {

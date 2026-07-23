@@ -184,7 +184,7 @@ struct StatsView: View {
 
     // MARK: - Layout helpers (pure — unit tested)
 
-    static let tooltipContentWidth: CGFloat = 116
+    static let tooltipContentWidth: CGFloat = 150
 
     /// Centers the tooltip near the cursor: to its right (flipping left near the
     /// right edge) and above it (flipping below near the top), always fully
