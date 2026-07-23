@@ -74,6 +74,40 @@ public struct UsageBreakdown: Sendable, Equatable {
     }
 }
 
+extension UsageBreakdown {
+    /// Estimated total USD across the whole window at the given rates.
+    public func totalCost(table: RateTable) -> Double {
+        byDayModel.values.reduce(0) { acc, models in
+            acc + models.reduce(0) { $0 + Pricing.cost(model: $1.key, $1.value, table: table) }
+        }
+    }
+
+    /// Estimated USD for one day.
+    public func cost(on day: Date, table: RateTable) -> Double {
+        (byDayModel[day] ?? [:]).reduce(0) { $0 + Pricing.cost(model: $1.key, $1.value, table: table) }
+    }
+
+    /// Estimated USD per model across the window.
+    public func costByModel(table: RateTable) -> [String: Double] {
+        var out: [String: Double] = [:]
+        for models in byDayModel.values {
+            for (model, b) in models {
+                out[model, default: 0] += Pricing.cost(model: model, b, table: table)
+            }
+        }
+        return out
+    }
+
+    /// Estimated USD per model for one day.
+    public func costByModel(on day: Date, table: RateTable) -> [String: Double] {
+        var out: [String: Double] = [:]
+        for (model, b) in byDayModel[day] ?? [:] {
+            out[model] = Pricing.cost(model: model, b, table: table)
+        }
+        return out
+    }
+}
+
 public protocol UsageMonitor: Sendable {
     /// Returns today's and the trailing-30-days token totals plus per-day and
     /// per-model breakdowns in one call, so the underlying source (the on-disk

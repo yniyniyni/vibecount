@@ -43,6 +43,18 @@ final class UsageBreakdownTests: XCTestCase {
         XCTAssertEqual(breakdown.byModel["Opus"], 15)   // .total drives the count views
     }
 
+    func testCostAggregations() {
+        let rates: RateTable = ["Opus": ModelRates(uncachedInput: 10, cachedInput: 0, cacheWrite: 0, output: 0)]
+        let usage = UsageBreakdown(daily: 0, monthly: 0, byDayModel: [
+            day1: ["Opus": TokenBreakdown(uncachedInput: 1_000_000)],   // $10
+            day2: ["Opus": TokenBreakdown(uncachedInput: 2_000_000)]    // $20
+        ])
+        XCTAssertEqual(usage.totalCost(table: rates), 30, accuracy: 1e-9)
+        XCTAssertEqual(usage.cost(on: day1, table: rates), 10, accuracy: 1e-9)
+        XCTAssertEqual(usage.costByModel(table: rates)["Opus"], 30)
+        XCTAssertEqual(usage.costByModel(on: day2, table: rates)["Opus"], 20)
+    }
+
     func testEmptyBreakdownHasEmptyViews() {
         let breakdown = UsageBreakdown(daily: 0, monthly: 0)
         XCTAssertTrue(breakdown.byDay.isEmpty)
