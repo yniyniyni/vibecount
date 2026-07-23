@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     var firestoreClient: FirestoreClient?
     let syncConfigStore = SyncConfigStore()
     var setupWindow: NSWindow?
+    var pricingWindow: NSWindow?
     var usageMonitor: UsageMonitor = CompositeUsageMonitor([
         ClaudeUsageMonitor(),
         CodexUsageMonitor(),
@@ -109,6 +110,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         NotificationCenter.default.addObserver(
             self, selector: #selector(openSyncSettings),
             name: NSNotification.Name("OpenSyncSettings"), object: nil)
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(openPricing),
+            name: NSNotification.Name("OpenPricing"), object: nil)
 
         // First run with no backend at all: offer setup once. Skipping is
         // remembered; the popover's "Sync Settings…" reopens it anytime.
@@ -310,6 +315,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             guard let self else { return }
             self.showSetupWindow(route: self.syncConfigStore.load() == nil ? .welcome : .settings)
         }
+    }
+
+    @objc func openPricing() {
+        // Same deferred presentation as openSyncSettings: unwind the transient
+        // popover's click cycle before building/showing the window.
+        popover?.performClose(nil)
+        DispatchQueue.main.async { [weak self] in
+            self?.showPricingWindow()
+        }
+    }
+
+    func showPricingWindow() {
+        pricingWindow?.close()
+        let view = PricingView(rates: rates, dismiss: { [weak self] in
+            self?.pricingWindow?.close()
+            self?.pricingWindow = nil
+        })
+        let hostingController = NSHostingController(rootView: view)
+        // Pin the size ourselves — see the SIGTRAP note in showSetupWindow.
+        hostingController.sizingOptions = .standardBounds
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Model Pricing"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 520, height: 560))
+        window.center()
+        pricingWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     func showSetupWindow(route: SetupModel.Route) {
