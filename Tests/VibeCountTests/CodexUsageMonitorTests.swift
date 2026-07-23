@@ -54,6 +54,18 @@ final class CodexUsageMonitorTests: XCTestCase {
         return String(data: data, encoding: .utf8)!
     }
 
+    /// A record that carries the session's active model at `payload.model`,
+    /// mirroring the real rollout schema (a `turn_context`/`session_meta` line).
+    private func modelLine(timestamp: String, model: String) -> String {
+        let root: [String: Any] = [
+            "timestamp": timestamp,
+            "type": "turn_context",
+            "payload": ["type": "turn_context", "model": model]
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: root)
+        return String(data: data, encoding: .utf8)!
+    }
+
     /// Writes lines to `<rootDir>/<subpath>/rollout.jsonl`, exercising the
     /// recursive enumerator (real logs nest under sessions/YYYY/MM/DD/).
     private func writeRollout(subpath: String, lines: [String]) throws {
@@ -63,7 +75,7 @@ final class CodexUsageMonitorTests: XCTestCase {
         try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
-    private func fetch() async throws -> DailyMonthlyUsage {
+    private func fetch() async throws -> UsageBreakdown {
         try await CodexUsageMonitor(rootURLs: [rootDir]).fetchUsage()
     }
 
@@ -129,6 +141,47 @@ final class CodexUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.monthly, 40)
     }
 
+    func testBucketsByDayAndAttributesModelFromHeader() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: today)!
+        try writeRollout(subpath: "sessions/2026/07/23", lines: [
+            modelLine(timestamp: timestamp(daysBeforeToday: 0), model: "gpt-5-codex"),
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 0), lastTotalTokens: 100),
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 2), lastTotalTokens: 40)
+        ])
+        let usage = try await fetch()
+
+        XCTAssertEqual(usage.daily, 100)
+        XCTAssertEqual(usage.monthly, 140)
+        XCTAssertEqual(usage.byDay[today], 100)
+        XCTAssertEqual(usage.byDay[twoDaysAgo], 40)
+        XCTAssertEqual(usage.byModel["gpt-5-codex"], 140)
+    }
+
+    func testFallsBackToCodexLabelWithoutHeaderModel() async throws {
+        try writeRollout(subpath: "sessions/nomodel", lines: [
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 0), lastTotalTokens: 70)
+        ])
+        let usage = try await fetch()
+
+        XCTAssertEqual(usage.monthly, 70)
+        XCTAssertEqual(usage.byModel["Codex"], 70)
+    }
+
+    func testAttributesTokensToTheMostRecentModelWhenItSwitchesMidSession() async throws {
+        try writeRollout(subpath: "sessions/switch", lines: [
+            modelLine(timestamp: timestamp(daysBeforeToday: 0), model: "gpt-5-codex"),
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 0), lastTotalTokens: 100),
+            modelLine(timestamp: timestamp(daysBeforeToday: 0), model: "gpt-5.6-terra"),
+            tokenCountLine(timestamp: timestamp(daysBeforeToday: 0), lastTotalTokens: 40)
+        ])
+        let usage = try await fetch()
+
+        XCTAssertEqual(usage.monthly, 140)
+        XCTAssertEqual(usage.byModel["gpt-5-codex"], 100)
+        XCTAssertEqual(usage.byModel["gpt-5.6-terra"], 40)
+    }
+
     func testMissingDirectoryReturnsZero() async throws {
         let monitor = CodexUsageMonitor(rootURLs: [rootDir.appendingPathComponent("does-not-exist")])
         let usage = try await monitor.fetchUsage()
@@ -142,7 +195,7 @@ final class CodexUsageMonitorTests: XCTestCase {
         ])
         let monitor = CodexUsageMonitor(rootURLs: [rootDir])
 
-        let task = Task { () -> DailyMonthlyUsage in
+        let task = Task { () -> UsageBreakdown in
             while !Task.isCancelled { await Task.yield() }
             return try await monitor.fetchUsage()
         }

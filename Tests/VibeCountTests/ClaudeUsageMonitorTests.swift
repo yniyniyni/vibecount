@@ -41,6 +41,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         timestamp: String,
         messageId: String?,
         requestId: String?,
+        model: String? = nil,
         input: Int = 0,
         cacheCreation: Int = 0,
         cacheRead: Int = 0,
@@ -54,6 +55,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         ]
         var message: [String: Any] = ["usage": usage]
         if let messageId { message["id"] = messageId }
+        if let model { message["model"] = model }
         var root: [String: Any] = [
             "type": "assistant",
             "timestamp": timestamp,
@@ -75,7 +77,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
-    private func fetch() async throws -> DailyMonthlyUsage {
+    private func fetch() async throws -> UsageBreakdown {
         try await ClaudeUsageMonitor(projectsURL: projectsDir).fetchUsage()
     }
 
@@ -191,7 +193,7 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         ])
         let monitor = ClaudeUsageMonitor(projectsURL: projectsDir)
 
-        let task = Task { () -> DailyMonthlyUsage in
+        let task = Task { () -> UsageBreakdown in
             // Deterministic: don't start scanning until cancellation has landed.
             while !Task.isCancelled { await Task.yield() }
             return try await monitor.fetchUsage()
@@ -204,6 +206,44 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         } catch is CancellationError {
             // expected: the scan honors cancellation instead of running on
         }
+    }
+
+    func testBreakdownBucketsByDayAndModelWhileTotalsAreUnchanged() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: today)!
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1",
+                          model: "claude-opus-4-20250514", input: 100, output: 50),   // 150, today, Opus
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m2", requestId: "r2",
+                          model: "claude-sonnet-4-5-20250929", input: 200),            // 200, today, Sonnet
+            assistantLine(timestamp: timestamp(daysBeforeToday: 3), messageId: "m3", requestId: "r3",
+                          model: "claude-opus-4-20250514", input: 400, output: 100)    // 500, -3d, Opus
+        ])
+        let usage = try await fetch()
+
+        XCTAssertEqual(usage.daily, 350)
+        XCTAssertEqual(usage.monthly, 850)
+        XCTAssertEqual(usage.byDay[today], 350)
+        XCTAssertEqual(usage.byDay[threeDaysAgo], 500)
+        XCTAssertEqual(usage.byModel["Opus"], 650)
+        XCTAssertEqual(usage.byModel["Sonnet"], 200)
+    }
+
+    func testCrossFileDuplicateLandsInASingleDayBucket() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        try writeSession(project: "orig", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "dup", requestId: "r1",
+                          model: "claude-opus-4-20250514", input: 300)
+        ])
+        try writeSession(project: "fork", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "dup", requestId: "r1",
+                          model: "claude-opus-4-20250514", input: 300)
+        ])
+        let usage = try await fetch()
+
+        XCTAssertEqual(usage.monthly, 300, "duplicate counted once")
+        XCTAssertEqual(usage.byDay[today], 300)
+        XCTAssertEqual(usage.byModel["Opus"], 300)
     }
 
     func testMissingDirectoryReturnsZero() async throws {

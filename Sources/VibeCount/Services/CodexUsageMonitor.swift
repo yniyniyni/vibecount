@@ -28,17 +28,17 @@ public struct CodexUsageMonitor: UsageMonitor {
         self.rootURLs = rootURLs
     }
 
-    public func fetchUsage() async throws -> DailyMonthlyUsage {
+    public func fetchUsage() async throws -> UsageBreakdown {
         try Task.checkCancellation()
 
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: Date())
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
-        var daily = 0
-        var monthly = 0
+        var byDay: [Date: Int] = [:]
+        var byModel: [String: Int] = [:]
 
         for url in collectRecentJSONLFiles(cutoff: startOf30Days) {
             try Task.checkCancellation()
@@ -46,13 +46,40 @@ public struct CodexUsageMonitor: UsageMonitor {
 
             try scanFile(
                 at: url,
-                startOfToday: startOfToday,
+                calendar: calendar,
                 startOf30Days: startOf30Days,
-                daily: &daily,
-                monthly: &monthly)
+                byDay: &byDay,
+                byModel: &byModel)
         }
 
-        return DailyMonthlyUsage(daily: daily, monthly: monthly)
+        let daily = byDay[startOfToday] ?? 0
+        let monthly = byDay.values.reduce(0, +)
+        return UsageBreakdown(daily: daily, monthly: monthly, byDay: byDay, byModel: byModel)
+    }
+
+    /// Candidate JSON paths where a Codex record carries the active model.
+    /// Checked in order; `payload.model` is the primary one (turn_context /
+    /// session records). The others are defensive against schema drift.
+    private static let codexModelPaths: [[String]] = [
+        ["payload", "model"],
+        ["payload", "info", "model"],
+        ["model"],
+    ]
+
+    /// Pulls a model name from a record via the known candidate paths. Returns
+    /// nil when none match.
+    private static func extractModel(from json: [String: Any]) -> String? {
+        for path in codexModelPaths {
+            var node: Any? = json
+            for key in path {
+                node = (node as? [String: Any])?[key]
+            }
+            if let value = node as? String,
+               !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     /// Synchronous directory walk across every root — `DirectoryEnumerator`
@@ -86,10 +113,10 @@ public struct CodexUsageMonitor: UsageMonitor {
 
     private func scanFile(
         at url: URL,
-        startOfToday: Date,
+        calendar: Calendar,
         startOf30Days: Date,
-        daily: inout Int,
-        monthly: inout Int
+        byDay: inout [Date: Int],
+        byModel: inout [String: Int]
     ) throws {
         let reader: LineReader
         do {
@@ -101,6 +128,11 @@ public struct CodexUsageMonitor: UsageMonitor {
         }
 
         var linesSinceCancellationCheck = 0
+        // The active model as the file streams chronologically. token_count
+        // events don't carry a model, so each delta is attributed to the most
+        // recently seen model record; before any is seen it falls back to
+        // "Codex". Handles a mid-session model switch correctly.
+        var currentModel: String?
 
         while true {
             linesSinceCancellationCheck += 1
@@ -116,26 +148,39 @@ public struct CodexUsageMonitor: UsageMonitor {
                 break // unreadable remainder: keep what was already parsed
             }
             guard let line else { break }
-            guard !line.isEmpty, line.contains("\"token_count\"") else { continue }
+            // Fast path: only model-bearing or usage lines need parsing. Every
+            // candidate model path ends in the key "model", so its serialized
+            // line contains the `"model"` token; usage lines contain
+            // `"token_count"`. Everything else (diffs, messages) is skipped.
+            guard line.contains("\"model\"") || line.contains("\"token_count\"") else { continue }
 
             autoreleasepool {
                 guard let data = line.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                      let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+                else { return }
+
+                // Track the active model from any record that names one.
+                if let model = Self.extractModel(from: json) {
+                    currentModel = model
+                }
+
+                // Only token_count events carry usage.
+                guard line.contains("\"token_count\""),
                       let timestampStr = json["timestamp"] as? String,
-                      let date = parseISO8601(timestampStr) else { return }
-
-                // Outside the monthly window → irrelevant to both totals.
-                guard date >= startOf30Days else { return }
-
-                guard let payload = json["payload"] as? [String: Any],
+                      let date = parseISO8601(timestampStr),
+                      date >= startOf30Days,
+                      let payload = json["payload"] as? [String: Any],
                       let payloadType = payload["type"] as? String, payloadType == "token_count",
                       let info = payload["info"] as? [String: Any],
                       let last = info["last_token_usage"] as? [String: Any],
                       let lineTokens = last["total_tokens"] as? Int,
-                      lineTokens > 0 else { return }
+                      lineTokens > 0
+                else { return }
 
-                monthly += lineTokens
-                if date >= startOfToday { daily += lineTokens }
+                let day = calendar.startOfDay(for: date)
+                let label = currentModel.map { ModelLabel.from($0) } ?? "Codex"
+                byDay[day, default: 0] += lineTokens
+                byModel[label, default: 0] += lineTokens
             }
         }
     }

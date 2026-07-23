@@ -28,6 +28,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         ClaudeUsageMonitor(),
         CodexUsageMonitor(),
     ])
+    /// Latest per-day / per-model breakdown, surfaced to the Stats tab. Updated
+    /// each poll; not persisted.
+    let usageStats = UsageStats()
     var updateTimer: Timer?
     var popover: NSPopover!
     var eventMonitor: Any?
@@ -150,7 +153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         Task { @MainActor in
             defer { isPolling = false }
 
-            let usage: DailyMonthlyUsage
+            let usage: UsageBreakdown
             do {
                 usage = try await usageMonitor.fetchUsage()
             } catch is CancellationError {
@@ -167,6 +170,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             if let button = statusItem?.button {
                 button.title = " " + usage.daily.formattedTokenCount
             }
+
+            // Surface the full breakdown to the Stats tab.
+            usageStats.breakdown = usage
 
             do {
                 try await syncService?.pushLocalUsage(dailyTokens: usage.daily, monthlyTokens: usage.monthly)
@@ -249,6 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         let dashboard = DashboardView()
             .modelContainer(container)
             .environment(syncService.status)
+            .environment(usageStats)
         popover.contentViewController = NSHostingController(rootView: dashboard)
     }
 

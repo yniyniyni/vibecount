@@ -18,50 +18,71 @@ public struct ClaudeUsageMonitor: UsageMonitor {
     /// pool — never the main actor — and it cooperates with the pool by
     /// checking cancellation and yielding between files. Files are streamed
     /// line-by-line rather than loaded whole (session logs can be tens of MB).
-    public func fetchUsage() async throws -> DailyMonthlyUsage {
+    public func fetchUsage() async throws -> UsageBreakdown {
         try Task.checkCancellation()
 
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: Date())
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
         guard FileManager.default.fileExists(atPath: projectsURL.path) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
         // De-duplicate assistant rows GLOBALLY by "<messageId>:<requestId>":
         // forked/continued sessions copy history rows into new JSONL files, so
-        // the same turn can appear in several files and must count once. Daily
-        // and monthly keep separate maps because a row can qualify for monthly
-        // but not today.
-        var dailyKeyed: [String: Int] = [:]
-        var dailyUnkeyed = 0
-        var monthlyKeyed: [String: Int] = [:]
-        var monthlyUnkeyed = 0
+        // the same turn can appear in several files and must count once. Each
+        // keyed entry remembers its day and model so this one pass also yields
+        // the per-day and per-model breakdowns; unkeyed rows (no id) can't be
+        // deduped and accumulate directly.
+        var keyed: [String: RowEntry] = [:]
+        var unkeyedByDay: [Date: Int] = [:]
+        var unkeyedByModel: [String: Int] = [:]
 
-        // Single pass computes both totals. Monthly covers the trailing
-        // 30 days; today's rows are a subset of it, so each line is classified
-        // once instead of walking the whole tree twice.
+        // Single pass. Monthly covers the trailing 30 days; today's rows are a
+        // subset of it, so each line is classified once rather than walking the
+        // tree twice.
         for url in collectRecentJSONLFiles(cutoff: startOf30Days) {
             try Task.checkCancellation()
             await Task.yield()
 
             try scanFile(
                 at: url,
-                startOfToday: startOfToday,
+                calendar: calendar,
                 startOf30Days: startOf30Days,
-                dailyKeyed: &dailyKeyed,
-                dailyUnkeyed: &dailyUnkeyed,
-                monthlyKeyed: &monthlyKeyed,
-                monthlyUnkeyed: &monthlyUnkeyed
+                keyed: &keyed,
+                unkeyedByDay: &unkeyedByDay,
+                unkeyedByModel: &unkeyedByModel
             )
         }
 
-        return DailyMonthlyUsage(
-            daily: dailyKeyed.values.reduce(0, +) + dailyUnkeyed,
-            monthly: monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed)
+        // Fold the deduplicated keyed rows into the same accumulators as the
+        // unkeyed ones. Because each entry carries its own day, daily/monthly
+        // come out byte-identical to the pre-breakdown totals.
+        var byDay = unkeyedByDay
+        var byModel = unkeyedByModel
+        var daily = 0
+        var monthly = 0
+        for entry in keyed.values {
+            monthly += entry.tokens
+            byDay[entry.day, default: 0] += entry.tokens
+            byModel[entry.model, default: 0] += entry.tokens
+            if entry.day == startOfToday { daily += entry.tokens }
+        }
+        monthly += unkeyedByDay.values.reduce(0, +)
+        daily += unkeyedByDay[startOfToday] ?? 0
+
+        return UsageBreakdown(daily: daily, monthly: monthly, byDay: byDay, byModel: byModel)
+    }
+
+    /// A deduplicated assistant row: its token total (max across duplicates),
+    /// the calendar day it belongs to, and its normalized model label.
+    private struct RowEntry {
+        var tokens: Int
+        let day: Date
+        let model: String
     }
 
     /// Synchronous directory walk — `DirectoryEnumerator` iteration is marked
@@ -96,12 +117,11 @@ public struct ClaudeUsageMonitor: UsageMonitor {
 
     private func scanFile(
         at url: URL,
-        startOfToday: Date,
+        calendar: Calendar,
         startOf30Days: Date,
-        dailyKeyed: inout [String: Int],
-        dailyUnkeyed: inout Int,
-        monthlyKeyed: inout [String: Int],
-        monthlyUnkeyed: inout Int
+        keyed: inout [String: RowEntry],
+        unkeyedByDay: inout [Date: Int],
+        unkeyedByModel: inout [String: Int]
     ) throws {
         let reader: LineReader
         do {
@@ -152,7 +172,8 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 let lineTokens = input + cacheCreate + cacheRead + output
                 if lineTokens == 0 { return }
 
-                let isToday = date >= startOfToday
+                let day = calendar.startOfDay(for: date)
+                let model = ModelLabel.from(message["model"] as? String)
                 let messageId = message["id"] as? String
                 let requestId = json["requestId"] as? String
 
@@ -162,12 +183,18 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                     // ordering isn't guaranteed stable, so with a cross-file
                     // duplicate (e.g. one copy truncated mid-stream) last-write-wins
                     // would make the total depend on enumeration order and could
-                    // flicker between polls.
-                    monthlyKeyed[key] = max(monthlyKeyed[key] ?? 0, lineTokens)
-                    if isToday { dailyKeyed[key] = max(dailyKeyed[key] ?? 0, lineTokens) }
+                    // flicker between polls. day/model are identical across
+                    // copies of a key.
+                    if let existing = keyed[key] {
+                        if lineTokens > existing.tokens {
+                            keyed[key] = RowEntry(tokens: lineTokens, day: day, model: model)
+                        }
+                    } else {
+                        keyed[key] = RowEntry(tokens: lineTokens, day: day, model: model)
+                    }
                 } else {
-                    monthlyUnkeyed += lineTokens
-                    if isToday { dailyUnkeyed += lineTokens }
+                    unkeyedByDay[day, default: 0] += lineTokens
+                    unkeyedByModel[model, default: 0] += lineTokens
                 }
             }
         }
