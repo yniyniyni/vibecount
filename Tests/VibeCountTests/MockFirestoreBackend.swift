@@ -10,6 +10,7 @@ actor MockFirestoreBackend: FirestoreBackend {
     private var signInResult: Result<String, FirestoreClientError> = .success("uid-1")
     private var signInGates: [CheckedContinuation<Void, Never>] = []
     private var gateSignIn = false
+    private var cancelAwareSignIn = false
 
     /// Parks every signIn() until releaseSignIn(), so tests can interleave
     /// service calls with in-flight starts. Holds a list, not one slot: a
@@ -17,10 +18,21 @@ actor MockFirestoreBackend: FirestoreBackend {
     /// one's continuation, stranding that task forever (cancellation does
     /// not resume a withCheckedContinuation).
     func holdSignIn() { gateSignIn = true }
+
+    /// Same gate, but faithful to URLSession's async API: a cancelled task
+    /// throws `URLError.cancelled` *out of* the await rather than returning
+    /// normally once released. A checked continuation can't model that, so
+    /// this parks in a yield loop that re-checks cancellation instead.
+    func holdSignInCancellable() {
+        gateSignIn = true
+        cancelAwareSignIn = true
+    }
+
     func releaseSignIn() {
         let gates = signInGates
         signInGates.removeAll()
         gateSignIn = false
+        cancelAwareSignIn = false
         for gate in gates { gate.resume() }
     }
 
@@ -39,7 +51,12 @@ actor MockFirestoreBackend: FirestoreBackend {
 
     func signIn() async throws -> String {
         calls.append("signIn")
-        if gateSignIn {
+        if cancelAwareSignIn {
+            while gateSignIn {
+                if Task.isCancelled { throw URLError(.cancelled) }
+                await Task.yield()
+            }
+        } else if gateSignIn {
             await withCheckedContinuation { signInGates.append($0) }
         }
         return try signInResult.get()
