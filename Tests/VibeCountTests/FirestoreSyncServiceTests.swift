@@ -257,6 +257,23 @@ final class FirestoreSyncServiceTests: XCTestCase {
         }
     }
 
+    func testCancelledStartDoesNotReportAUserFacingError() async throws {
+        // The real backend (URLSession) aborts an in-flight request when the
+        // task is cancelled and throws URLError.cancelled out of the await, so
+        // the cancellation checkpoints between awaits never get a turn. Stopping
+        // sync is a user action, not a failure — the dashboard's warning banner
+        // must stay clear.
+        await backend.holdSignInCancellable()
+        let inFlight = Task { await service.startSyncing() }
+        // Wait until the start is parked inside signIn.
+        while await backend.calls.isEmpty { await Task.yield() }
+
+        service.stopSyncing()
+        await inFlight.value
+
+        XCTAssertNil(service.status.lastError)
+    }
+
     func testCancelledStartDoesNotAdoptIdentityOrWriteRemote() async throws {
         // Simulate a backend switch that has already adopted a new uid
         // locally: a cancelled start under the OLD backend must not clobber

@@ -86,8 +86,8 @@ public final class FirestoreSyncService: SyncService {
             // adoptIdentity, registerInviteCode, and ensureRemoteUserDoc all do
             // real damage (identity rewrite, remote writes) under the OLD
             // backend if allowed to run after a cancellation. `guard` (not
-            // `try Task.checkCancellation()`) so cancellation never falls into
-            // the `catch` below and surfaces as a spurious user-facing error.
+            // `try Task.checkCancellation()`) so a cancellation noticed here
+            // returns quietly rather than routing through the `catch` below.
             guard !Task.isCancelled else { return }
             let user = try adoptIdentity(uid: uid)
             guard !Task.isCancelled else { return }
@@ -101,6 +101,12 @@ public final class FirestoreSyncService: SyncService {
             logger.info("Sync started")
             await refreshLeaderboard()
         } catch {
+            // The guards above only run between awaits — a cancellation that
+            // lands while parked inside one is thrown out of it instead
+            // (URLSession reports it as URLError.cancelled, not
+            // CancellationError). A user asking to stop isn't a sync failure,
+            // so it must not paint the dashboard's warning banner.
+            if Task.isCancelled { return }
             logger.error("Sync start failed: \(error, privacy: .public)")
             status.lastError = "Sync isn't available: \(error.localizedDescription)"
         }
