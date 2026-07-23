@@ -173,8 +173,39 @@ actor FirestoreClient {
         idTokenExpiry = Date().addingTimeInterval(TimeInterval(expiresIn ?? "") ?? 3600)
     }
 
+    /// A stale connection left in URLSession's reuse pool — very likely after
+    /// the 10-minute idle gap between polls, or after wake-from-sleep — surfaces
+    /// the next request as a transient `URLError` (most often -1005
+    /// `networkConnectionLost`). An immediate retry goes out on a fresh
+    /// connection and succeeds, so retry ONCE before letting the error surface;
+    /// otherwise a self-healing blip becomes a sticky "Sync failed" banner.
+    ///
+    /// The retry is bounded to one and covers only genuinely transient transport
+    /// failures. `URLError.cancelled` is excluded so a backend-switch
+    /// cancellation propagates at once, and every non-transient error surfaces
+    /// unchanged. Both request paths funnel through here. Bodies are always sent
+    /// as `Data` (never a one-shot stream), so a retry re-sends them intact; the
+    /// only non-idempotent op is `createDocument`, whose callers already treat a
+    /// retry's `.alreadyExists` as success.
+    private func dataWithTransientRetry(for request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where Self.isTransientTransportFailure(error) {
+            return try await session.data(for: request)
+        }
+    }
+
+    private static func isTransientTransportFailure(_ error: URLError) -> Bool {
+        switch error.code {
+        case .networkConnectionLost, .timedOut, .cannotConnectToHost:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func authRequest(_ request: URLRequest) async throws -> [String: Any] {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await dataWithTransientRetry(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(status) else {
@@ -343,7 +374,7 @@ actor FirestoreClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await dataWithTransientRetry(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401, !isRetry {
             invalidateToken()
