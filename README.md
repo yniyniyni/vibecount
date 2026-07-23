@@ -13,6 +13,8 @@ those aggregate totals with friends.
   logs from `~/.codex/sessions` and `~/.codex/archived_sessions`.
 - Combines Claude Code and Codex token usage into one daily and 30-day total.
 - Ranks today and rolling 30-day usage in a compact native dashboard.
+- Shows a local **Stats** tab: your own tokens per day over the last 30 days
+  and a breakdown by model (Opus, Sonnet, Haiku, Codex).
 - Works locally with no account or backend.
 - Syncs leaderboards through the shared VibeCount cloud or a self-hosted
   Firebase project.
