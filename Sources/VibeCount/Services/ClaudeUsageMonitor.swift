@@ -38,8 +38,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         // the per-day and per-model breakdowns; unkeyed rows (no id) can't be
         // deduped and accumulate directly.
         var keyed: [String: RowEntry] = [:]
-        var unkeyedByDay: [Date: Int] = [:]
-        var unkeyedByModel: [String: Int] = [:]
+        var unkeyedByDayModel: [Date: [String: Int]] = [:]
 
         // Single pass. Monthly covers the trailing 30 days; today's rows are a
         // subset of it, so each line is classified once rather than walking the
@@ -53,28 +52,28 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 calendar: calendar,
                 startOf30Days: startOf30Days,
                 keyed: &keyed,
-                unkeyedByDay: &unkeyedByDay,
-                unkeyedByModel: &unkeyedByModel
+                unkeyedByDayModel: &unkeyedByDayModel
             )
         }
 
-        // Fold the deduplicated keyed rows into the same accumulators as the
-        // unkeyed ones. Because each entry carries its own day, daily/monthly
-        // come out byte-identical to the pre-breakdown totals.
-        var byDay = unkeyedByDay
-        var byModel = unkeyedByModel
+        // Fold the deduplicated keyed rows into the same per-day/per-model
+        // accumulator as the unkeyed ones. Because each entry carries its own
+        // day, daily/monthly come out byte-identical to the pre-breakdown totals.
+        var byDayModel = unkeyedByDayModel
         var daily = 0
         var monthly = 0
         for entry in keyed.values {
             monthly += entry.tokens
-            byDay[entry.day, default: 0] += entry.tokens
-            byModel[entry.model, default: 0] += entry.tokens
+            byDayModel[entry.day, default: [:]][entry.model, default: 0] += entry.tokens
             if entry.day == startOfToday { daily += entry.tokens }
         }
-        monthly += unkeyedByDay.values.reduce(0, +)
-        daily += unkeyedByDay[startOfToday] ?? 0
+        for (day, models) in unkeyedByDayModel {
+            let dayTotal = models.values.reduce(0, +)
+            monthly += dayTotal
+            if day == startOfToday { daily += dayTotal }
+        }
 
-        return UsageBreakdown(daily: daily, monthly: monthly, byDay: byDay, byModel: byModel)
+        return UsageBreakdown(daily: daily, monthly: monthly, byDayModel: byDayModel)
     }
 
     /// A deduplicated assistant row: its token total (max across duplicates),
@@ -120,8 +119,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         calendar: Calendar,
         startOf30Days: Date,
         keyed: inout [String: RowEntry],
-        unkeyedByDay: inout [Date: Int],
-        unkeyedByModel: inout [String: Int]
+        unkeyedByDayModel: inout [Date: [String: Int]]
     ) throws {
         let reader: LineReader
         do {
@@ -193,8 +191,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                         keyed[key] = RowEntry(tokens: lineTokens, day: day, model: model)
                     }
                 } else {
-                    unkeyedByDay[day, default: 0] += lineTokens
-                    unkeyedByModel[model, default: 0] += lineTokens
+                    unkeyedByDayModel[day, default: [:]][model, default: 0] += lineTokens
                 }
             }
         }

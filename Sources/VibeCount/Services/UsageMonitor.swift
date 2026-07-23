@@ -1,24 +1,42 @@
 import Foundation
 
-/// Daily and 30-day rolling token totals, plus per-day and per-model
-/// breakdowns — all computed together in a single scan. `daily` and `monthly`
-/// keep their original meaning (today's total, trailing-30-day total); `byDay`
-/// and `byModel` are the added detail for the Stats view.
+/// Daily and 30-day rolling token totals, plus a per-day / per-model breakdown —
+/// all computed together in a single scan. `daily` and `monthly` keep their
+/// original meaning (today's total, trailing-30-day total). `byDayModel` is the
+/// canonical detail for the Stats view; `byDay`, `byModel`, and `models(on:)`
+/// are derived views over it (single source of truth, no redundant state).
 public struct UsageBreakdown: Sendable, Equatable {
     public let daily: Int
     public let monthly: Int
-    /// startOfDay → tokens, within the 30-day window. Days with no usage are
-    /// absent (the view zero-fills the axis).
-    public let byDay: [Date: Int]
-    /// Model label (see `ModelLabel`) → tokens, within the window.
-    public let byModel: [String: Int]
+    /// startOfDay → (model label → tokens), within the 30-day window. Days with
+    /// no usage are absent (the view zero-fills the axis).
+    public let byDayModel: [Date: [String: Int]]
 
-    public init(daily: Int, monthly: Int,
-                byDay: [Date: Int] = [:], byModel: [String: Int] = [:]) {
+    public init(daily: Int, monthly: Int, byDayModel: [Date: [String: Int]] = [:]) {
         self.daily = daily
         self.monthly = monthly
-        self.byDay = byDay
-        self.byModel = byModel
+        self.byDayModel = byDayModel
+    }
+
+    /// Total tokens per day.
+    public var byDay: [Date: Int] {
+        byDayModel.mapValues { $0.values.reduce(0, +) }
+    }
+
+    /// Total tokens per model across the whole window.
+    public var byModel: [String: Int] {
+        var result: [String: Int] = [:]
+        for models in byDayModel.values {
+            for (model, tokens) in models {
+                result[model, default: 0] += tokens
+            }
+        }
+        return result
+    }
+
+    /// The per-model breakdown for a single day (empty if that day has none).
+    public func models(on day: Date) -> [String: Int] {
+        byDayModel[day] ?? [:]
     }
 }
 

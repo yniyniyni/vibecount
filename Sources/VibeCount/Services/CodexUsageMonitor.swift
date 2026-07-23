@@ -37,8 +37,7 @@ public struct CodexUsageMonitor: UsageMonitor {
             return UsageBreakdown(daily: 0, monthly: 0)
         }
 
-        var byDay: [Date: Int] = [:]
-        var byModel: [String: Int] = [:]
+        var byDayModel: [Date: [String: Int]] = [:]
 
         for url in collectRecentJSONLFiles(cutoff: startOf30Days) {
             try Task.checkCancellation()
@@ -48,13 +47,12 @@ public struct CodexUsageMonitor: UsageMonitor {
                 at: url,
                 calendar: calendar,
                 startOf30Days: startOf30Days,
-                byDay: &byDay,
-                byModel: &byModel)
+                byDayModel: &byDayModel)
         }
 
-        let daily = byDay[startOfToday] ?? 0
-        let monthly = byDay.values.reduce(0, +)
-        return UsageBreakdown(daily: daily, monthly: monthly, byDay: byDay, byModel: byModel)
+        let daily = (byDayModel[startOfToday]?.values.reduce(0, +)) ?? 0
+        let monthly = byDayModel.values.reduce(0) { $0 + $1.values.reduce(0, +) }
+        return UsageBreakdown(daily: daily, monthly: monthly, byDayModel: byDayModel)
     }
 
     /// Candidate JSON paths where a Codex record carries the active model.
@@ -115,8 +113,7 @@ public struct CodexUsageMonitor: UsageMonitor {
         at url: URL,
         calendar: Calendar,
         startOf30Days: Date,
-        byDay: inout [Date: Int],
-        byModel: inout [String: Int]
+        byDayModel: inout [Date: [String: Int]]
     ) throws {
         let reader: LineReader
         do {
@@ -179,8 +176,7 @@ public struct CodexUsageMonitor: UsageMonitor {
 
                 let day = calendar.startOfDay(for: date)
                 let label = currentModel.map { ModelLabel.from($0) } ?? "Codex"
-                byDay[day, default: 0] += lineTokens
-                byModel[label, default: 0] += lineTokens
+                byDayModel[day, default: [:]][label, default: 0] += lineTokens
             }
         }
     }
