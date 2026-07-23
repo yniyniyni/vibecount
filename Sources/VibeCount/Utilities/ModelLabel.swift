@@ -11,6 +11,13 @@ public enum ModelLabel {
         if raw.hasPrefix("claude-opus") { return "Opus" }
         if raw.hasPrefix("claude-sonnet") { return "Sonnet" }
         if raw.hasPrefix("claude-haiku") { return "Haiku" }
+        if raw.hasPrefix("claude-fable") { return "Fable" }
+        // gpt-5.6-sol / -terra / -luna → "GPT 5.6 Sol" etc. Any variant is
+        // title-cased, so future 5.6 variants read cleanly too.
+        if raw.hasPrefix("gpt-5.6-") {
+            let variant = String(raw.dropFirst("gpt-5.6-".count))
+            if !variant.isEmpty { return "GPT 5.6 " + variant.capitalized }
+        }
         return raw
     }
 }

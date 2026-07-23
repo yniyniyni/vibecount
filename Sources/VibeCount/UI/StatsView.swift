@@ -7,6 +7,10 @@ import Charts
 /// previews without the object (mirrors DashboardView's SyncStatus? handling).
 struct StatsView: View {
     @Environment(UsageStats.self) private var stats: UsageStats?
+    /// The day currently under the cursor in the chart, and where the cursor is,
+    /// so the detail tooltip can follow it. Cleared when the cursor leaves.
+    @State private var selectedDay: Date?
+    @State private var hoverLocation: CGPoint = .zero
 
     var body: some View {
         if let breakdown = stats?.breakdown, breakdown.monthly > 0 {
@@ -33,13 +37,21 @@ struct StatsView: View {
     // 30-day continuous axis, zero-filled so gaps render as empty days.
     private func dailySection(_ breakdown: UsageBreakdown) -> some View {
         let days = Self.last30Days()
+        let byDay = breakdown.byDay
         return VStack(alignment: .leading, spacing: 6) {
             Text("Tokens / day")
                 .font(.caption).foregroundStyle(.secondary)
-            Chart(days, id: \.self) { day in
-                BarMark(
-                    x: .value("Day", day, unit: .day),
-                    y: .value("Tokens", breakdown.byDay[day] ?? 0))
+            Chart {
+                ForEach(days, id: \.self) { day in
+                    BarMark(
+                        x: .value("Day", day, unit: .day),
+                        y: .value("Tokens", byDay[day] ?? 0))
+                }
+                if let selectedDay {
+                    RuleMark(x: .value("Day", selectedDay, unit: .day))
+                        .foregroundStyle(Color.accentColor)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: 7)) { _ in
@@ -56,6 +68,32 @@ struct StatsView: View {
                         if let raw = value.as(Double.self) {
                             Text(Int(raw).formattedTokenCount)
                         }
+                    }
+                }
+            }
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    // Transparent catcher tracks the cursor and maps its x to a day.
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                updateSelection(at: location, proxy: proxy, geo: geo, days: days)
+                            case .ended:
+                                selectedDay = nil
+                            }
+                        }
+
+                    if let selectedDay {
+                        let detail = dayDetail(for: selectedDay, breakdown: breakdown)
+                        tooltip(detail)
+                            .position(Self.tooltipCenter(
+                                location: hoverLocation,
+                                container: geo.size,
+                                rowCount: max(detail.models.count, 1)))
+                            .allowsHitTesting(false)   // never steal the hover
                     }
                 }
             }
@@ -85,6 +123,86 @@ struct StatsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Hover tooltip
+
+    /// A single day's detail: total plus its per-model rows, sorted desc.
+    struct DayDetail {
+        let day: Date
+        let total: Int
+        let models: [(label: String, tokens: Int)]
+    }
+
+    private func dayDetail(for day: Date, breakdown: UsageBreakdown) -> DayDetail {
+        let models = breakdown.models(on: day)
+        let sorted = models.sorted { $0.value > $1.value }.map { (label: $0.key, tokens: $0.value) }
+        return DayDetail(day: day, total: models.values.reduce(0, +), models: sorted)
+    }
+
+    private func tooltip(_ detail: DayDetail) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(detail.day, format: .dateTime.month().day())
+                .font(.caption.bold())
+            Text("\(detail.total.formattedTokenCount) total")
+                .font(.caption2).foregroundStyle(.secondary)
+            if detail.models.isEmpty {
+                Text("No usage").font(.caption2).foregroundStyle(.secondary)
+            } else {
+                ForEach(detail.models, id: \.label) { model in
+                    HStack(spacing: 8) {
+                        Text(model.label).font(.caption2)
+                        Spacer(minLength: 10)
+                        Text(model.tokens.formattedTokenCount)
+                            .font(.caption2).fontDesign(.monospaced)
+                    }
+                }
+            }
+        }
+        .frame(width: Self.tooltipContentWidth, alignment: .leading)
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+        .shadow(radius: 3)
+    }
+
+    /// Maps the cursor position to a day within the 30-day window, or clears the
+    /// selection when the cursor is off the plot or outside the window.
+    private func updateSelection(at location: CGPoint, proxy: ChartProxy, geo: GeometryProxy, days: [Date]) {
+        guard let plotFrame = proxy.plotFrame else { return }
+        let rect = geo[plotFrame]
+        guard rect.contains(location) else { selectedDay = nil; return }
+        guard let date: Date = proxy.value(atX: location.x - rect.origin.x) else { return }
+        let day = Calendar.current.startOfDay(for: date)
+        guard let first = days.first, let last = days.last, day >= first, day <= last else {
+            selectedDay = nil
+            return
+        }
+        selectedDay = day
+        hoverLocation = location
+    }
+
+    // MARK: - Layout helpers (pure — unit tested)
+
+    static let tooltipContentWidth: CGFloat = 150
+
+    /// Centers the tooltip near the cursor: to its right (flipping left near the
+    /// right edge) and above it (flipping below near the top), always fully
+    /// inside `container`.
+    static func tooltipCenter(location: CGPoint, container: CGSize, rowCount: Int) -> CGPoint {
+        let width = tooltipContentWidth + 12            // content + padding
+        let height = 34 + CGFloat(max(rowCount, 1)) * 14
+        let halfW = width / 2, halfH = height / 2
+
+        var x = location.x + halfW + 12
+        if x + halfW > container.width { x = location.x - halfW - 12 }  // flip left
+        x = min(max(x, halfW + 2), max(halfW + 2, container.width - halfW - 2))
+
+        var y = location.y - halfH - 8
+        if y - halfH < 0 { y = location.y + halfH + 8 }                 // flip below
+        y = min(max(y, halfH + 2), max(halfH + 2, container.height - halfH - 2))
+
+        return CGPoint(x: x, y: y)
     }
 
     /// The trailing 30 startOfDay dates, oldest first.

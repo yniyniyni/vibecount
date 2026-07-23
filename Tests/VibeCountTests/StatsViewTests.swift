@@ -16,11 +16,43 @@ final class StatsViewTests: XCTestCase {
         let day = Calendar.current.startOfDay(for: Date())
         let stats = UsageStats()
         stats.breakdown = UsageBreakdown(daily: 100, monthly: 300,
-                                         byDay: [day: 100], byModel: ["Opus": 200, "Sonnet": 100])
+                                         byDayModel: [day: ["Opus": 200, "Sonnet": 100]])
         render(StatsView().environment(stats))
     }
 
     func testRendersEmptyState() {
         render(StatsView().environment(UsageStats()))
+    }
+
+    // MARK: - tooltipCenter (pure geometry)
+
+    private let container = CGSize(width: 260, height: 140)
+
+    private func assertWithinBounds(_ center: CGPoint, rowCount: Int) {
+        let width = StatsView.tooltipContentWidth + 12
+        let height = 34 + CGFloat(max(rowCount, 1)) * 14
+        XCTAssertGreaterThanOrEqual(center.x - width / 2, -0.5, "overflows left")
+        XCTAssertLessThanOrEqual(center.x + width / 2, container.width + 0.5, "overflows right")
+        XCTAssertGreaterThanOrEqual(center.y - height / 2, -0.5, "overflows top")
+        XCTAssertLessThanOrEqual(center.y + height / 2, container.height + 0.5, "overflows bottom")
+    }
+
+    func testTooltipStaysInBoundsNearRightEdge() {
+        let center = StatsView.tooltipCenter(
+            location: CGPoint(x: 255, y: 70), container: container, rowCount: 3)
+        assertWithinBounds(center, rowCount: 3)
+    }
+
+    func testTooltipStaysInBoundsNearTopLeft() {
+        let center = StatsView.tooltipCenter(
+            location: CGPoint(x: 5, y: 3), container: container, rowCount: 4)
+        assertWithinBounds(center, rowCount: 4)
+    }
+
+    func testTooltipSitsToTheRightWhenThereIsRoom() {
+        // Cursor on the left with plenty of space → tooltip centers to its right.
+        let center = StatsView.tooltipCenter(
+            location: CGPoint(x: 40, y: 70), container: container, rowCount: 1)
+        XCTAssertGreaterThan(center.x, 40, "tooltip should sit to the right of the cursor")
     }
 }

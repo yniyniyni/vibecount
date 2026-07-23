@@ -227,6 +227,9 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.byDay[threeDaysAgo], 500)
         XCTAssertEqual(usage.byModel["Opus"], 650)
         XCTAssertEqual(usage.byModel["Sonnet"], 200)
+        // Per-day, per-model detail (drives the hover tooltip).
+        XCTAssertEqual(usage.models(on: today), ["Opus": 150, "Sonnet": 200])
+        XCTAssertEqual(usage.models(on: threeDaysAgo), ["Opus": 500])
     }
 
     func testCrossFileDuplicateLandsInASingleDayBucket() async throws {

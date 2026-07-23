@@ -178,8 +178,8 @@ final class CodexUsageMonitorTests: XCTestCase {
         let usage = try await fetch()
 
         XCTAssertEqual(usage.monthly, 140)
-        XCTAssertEqual(usage.byModel["gpt-5-codex"], 100)
-        XCTAssertEqual(usage.byModel["gpt-5.6-terra"], 40)
+        XCTAssertEqual(usage.byModel["gpt-5-codex"], 100)          // no 5.6 prefix → raw passthrough
+        XCTAssertEqual(usage.byModel["GPT 5.6 Terra"], 40)         // gpt-5.6-terra → friendly label
     }
 
     func testMissingDirectoryReturnsZero() async throws {
