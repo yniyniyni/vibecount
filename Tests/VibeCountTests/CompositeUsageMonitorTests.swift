@@ -61,16 +61,17 @@ final class CompositeUsageMonitorTests: XCTestCase {
         let day = Calendar.current.startOfDay(for: Date())
         let composite = CompositeUsageMonitor([
             StubMonitor(usage: UsageBreakdown(daily: 10, monthly: 10,
-                                              byDay: [day: 10], byModel: ["Opus": 10])),
+                                              byDayModel: [day: ["Opus": 10]])),
             StubMonitor(usage: UsageBreakdown(daily: 5, monthly: 20,
-                                              byDay: [day: 5], byModel: ["Opus": 5, "Codex": 20]))
+                                              byDayModel: [day: ["Opus": 5, "Codex": 20]]))
         ])
         let usage = try await composite.fetchUsage()
 
         XCTAssertEqual(usage.daily, 15)
         XCTAssertEqual(usage.monthly, 30)
-        XCTAssertEqual(usage.byDay[day], 15)
-        XCTAssertEqual(usage.byModel["Opus"], 15)
+        XCTAssertEqual(usage.byDay[day], 35)                       // 10 + (5 + 20)
+        XCTAssertEqual(usage.byModel["Opus"], 15)                  // 10 + 5
         XCTAssertEqual(usage.byModel["Codex"], 20)
+        XCTAssertEqual(usage.models(on: day), ["Opus": 15, "Codex": 20])
     }
 }
