@@ -4,18 +4,36 @@ import SwiftData
 public struct DashboardView: View {
     @Query var friends: [Friend]
     @Query var users: [User]
-    @State private var selectedTab: LeaderboardTab = .today
+    @State private var selection: DashboardContent = .leaderboard(.today)
     // Optional so the view also renders (e.g. in tests) without a status in
     // the environment.
     @Environment(SyncStatus.self) private var syncStatus: SyncStatus?
 
     public init() {}
 
+    /// The popover's top-level segments: the two friend leaderboards plus this
+    /// Mac's own Stats. Stats isn't a leaderboard ranking, so it's a distinct
+    /// case rather than another LeaderboardTab.
+    private enum DashboardContent: Hashable {
+        case leaderboard(LeaderboardTab)
+        case stats
+
+        var title: String {
+            switch self {
+            case .leaderboard(let tab): tab.title
+            case .stats: "Stats"
+            }
+        }
+    }
+
+    private static let segments: [DashboardContent] =
+        LeaderboardTab.allCases.map(DashboardContent.leaderboard) + [.stats]
+
     public var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                ForEach(LeaderboardTab.allCases, id: \.self) { tab in
-                    Text(tab.title).tag(tab)
+            Picker("", selection: $selection) {
+                ForEach(Self.segments, id: \.self) { segment in
+                    Text(segment.title).tag(segment)
                 }
             }
             .pickerStyle(.segmented)
@@ -23,40 +41,12 @@ public struct DashboardView: View {
 
             Divider()
 
-            // Each tab sorts by the figure it displays.
-            List(selectedTab.sorted(friends)) { friend in
-                let isMe = friend.friendId == users.first?.userId
-                HStack {
-                    Text(friend.displayName)
-                        .fontWeight(isMe ? .bold : .regular)
-
-                    if isMe {
-                        Text("(You)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-
-                    Text(selectedTab.tokens(for: friend).formattedTokenCount)
-                        .fontWeight(.bold)
-                        .fontDesign(.monospaced)
-                }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-                .contextMenu {
-                    if !isMe {
-                        Button("Remove Friend", role: .destructive) {
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("RemoveFriend"),
-                                object: nil,
-                                userInfo: ["friendId": friend.friendId]
-                            )
-                        }
-                    }
-                }
+            switch selection {
+            case .leaderboard(let tab):
+                leaderboard(tab)
+            case .stats:
+                StatsView()
             }
-            .scrollContentBackground(.hidden)
 
             Divider()
 
@@ -154,5 +144,42 @@ public struct DashboardView: View {
             .padding(.vertical, 8)
         }
         .frame(width: 300, height: 400)
+    }
+
+    /// The friend leaderboard for one tab, ranked by the figure it shows.
+    private func leaderboard(_ tab: LeaderboardTab) -> some View {
+        List(tab.sorted(friends)) { friend in
+            let isMe = friend.friendId == users.first?.userId
+            HStack {
+                Text(friend.displayName)
+                    .fontWeight(isMe ? .bold : .regular)
+
+                if isMe {
+                    Text("(You)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Text(tab.tokens(for: friend).formattedTokenCount)
+                    .fontWeight(.bold)
+                    .fontDesign(.monospaced)
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .contextMenu {
+                if !isMe {
+                    Button("Remove Friend", role: .destructive) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("RemoveFriend"),
+                            object: nil,
+                            userInfo: ["friendId": friend.friendId]
+                        )
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
     }
 }
