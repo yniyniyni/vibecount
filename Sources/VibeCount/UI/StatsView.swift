@@ -47,7 +47,19 @@ struct StatsView: View {
                     AxisValueLabel(format: .dateTime.month().day())
                 }
             }
-            .frame(height: 120)
+            .chartYAxis {
+                // Compact token labels ("100M") instead of Swift Charts' default
+                // scientific notation ("1.0E8").
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let raw = value.as(Double.self) {
+                            Text(Int(raw).formattedTokenCount)
+                        }
+                    }
+                }
+            }
+            .frame(height: 140)
         }
     }
 
