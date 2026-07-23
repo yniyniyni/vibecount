@@ -28,13 +28,13 @@ public struct CodexUsageMonitor: UsageMonitor {
         self.rootURLs = rootURLs
     }
 
-    public func fetchUsage() async throws -> DailyMonthlyUsage {
+    public func fetchUsage() async throws -> UsageBreakdown {
         try Task.checkCancellation()
 
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: Date())
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
         var daily = 0
@@ -52,7 +52,7 @@ public struct CodexUsageMonitor: UsageMonitor {
                 monthly: &monthly)
         }
 
-        return DailyMonthlyUsage(daily: daily, monthly: monthly)
+        return UsageBreakdown(daily: daily, monthly: monthly)
     }
 
     /// Synchronous directory walk across every root — `DirectoryEnumerator`

@@ -63,7 +63,7 @@ final class CodexUsageMonitorTests: XCTestCase {
         try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
-    private func fetch() async throws -> DailyMonthlyUsage {
+    private func fetch() async throws -> UsageBreakdown {
         try await CodexUsageMonitor(rootURLs: [rootDir]).fetchUsage()
     }
 
@@ -142,7 +142,7 @@ final class CodexUsageMonitorTests: XCTestCase {
         ])
         let monitor = CodexUsageMonitor(rootURLs: [rootDir])
 
-        let task = Task { () -> DailyMonthlyUsage in
+        let task = Task { () -> UsageBreakdown in
             while !Task.isCancelled { await Task.yield() }
             return try await monitor.fetchUsage()
         }

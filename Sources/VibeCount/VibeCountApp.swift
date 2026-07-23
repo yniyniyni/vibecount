@@ -150,7 +150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         Task { @MainActor in
             defer { isPolling = false }
 
-            let usage: DailyMonthlyUsage
+            let usage: UsageBreakdown
             do {
                 usage = try await usageMonitor.fetchUsage()
             } catch is CancellationError {

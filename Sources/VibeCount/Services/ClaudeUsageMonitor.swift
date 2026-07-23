@@ -18,17 +18,17 @@ public struct ClaudeUsageMonitor: UsageMonitor {
     /// pool — never the main actor — and it cooperates with the pool by
     /// checking cancellation and yielding between files. Files are streamed
     /// line-by-line rather than loaded whole (session logs can be tens of MB).
-    public func fetchUsage() async throws -> DailyMonthlyUsage {
+    public func fetchUsage() async throws -> UsageBreakdown {
         try Task.checkCancellation()
 
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: Date())
         guard let startOf30Days = calendar.date(byAdding: .day, value: -29, to: startOfToday) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
         guard FileManager.default.fileExists(atPath: projectsURL.path) else {
-            return DailyMonthlyUsage(daily: 0, monthly: 0)
+            return UsageBreakdown(daily: 0, monthly: 0)
         }
 
         // De-duplicate assistant rows GLOBALLY by "<messageId>:<requestId>":
@@ -59,7 +59,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             )
         }
 
-        return DailyMonthlyUsage(
+        return UsageBreakdown(
             daily: dailyKeyed.values.reduce(0, +) + dailyUnkeyed,
             monthly: monthlyKeyed.values.reduce(0, +) + monthlyUnkeyed)
     }
