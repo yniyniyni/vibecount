@@ -22,6 +22,6 @@ final class UIViewTests: XCTestCase {
         
         let fittingSize = hostingController.sizeThatFits(in: NSSize(width: 1000, height: 1000))
         XCTAssertEqual(fittingSize.width, 300, "View width should match the fixed frame size")
-        XCTAssertEqual(fittingSize.height, 400, "View height should match the fixed frame size")
+        XCTAssertEqual(fittingSize.height, 560, "View height should match the fixed frame size")
     }
 }

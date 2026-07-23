@@ -65,7 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         syncService = makeSyncService(container: container)
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 300, height: 400)
+        popover.contentSize = NSSize(width: 300, height: 560)
         popover.behavior = .transient
         rebuildPopoverContent()
         popover.delegate = self

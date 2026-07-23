@@ -143,7 +143,7 @@ public struct DashboardView: View {
             }
             .padding(.vertical, 8)
         }
-        .frame(width: 300, height: 400)
+        .frame(width: 300, height: 560)
     }
 
     /// The friend leaderboard for one tab, ranked by the figure it shows.
