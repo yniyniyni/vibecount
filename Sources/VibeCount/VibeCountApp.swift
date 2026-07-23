@@ -31,6 +31,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     /// Latest per-day / per-model breakdown, surfaced to the Stats tab. Updated
     /// each poll; not persisted.
     let usageStats = UsageStats()
+    /// Effective per-model pricing (defaults + user overrides), edited in the
+    /// Pricing window and read by the Stats view.
+    let rates = Rates()
     var updateTimer: Timer?
     var popover: NSPopover!
     var eventMonitor: Any?
@@ -256,6 +259,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             .modelContainer(container)
             .environment(syncService.status)
             .environment(usageStats)
+            .environment(rates)
         popover.contentViewController = NSHostingController(rootView: dashboard)
     }
 
