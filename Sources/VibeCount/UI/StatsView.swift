@@ -7,13 +7,16 @@ import Charts
 /// previews without the object (mirrors DashboardView's SyncStatus? handling).
 struct StatsView: View {
     @Environment(UsageStats.self) private var stats: UsageStats?
+    /// Optional so the view still renders without pricing (tests/previews fall
+    /// back to the shipped defaults).
+    @Environment(Rates.self) private var rates: Rates?
     /// The day currently under the cursor in the chart, and where the cursor is,
     /// so the detail tooltip can follow it. Cleared when the cursor leaves.
     @State private var selectedDay: Date?
     @State private var hoverLocation: CGPoint = .zero
 
-    /// Effective per-model rates. Phase B swaps this for the environment `Rates`.
-    private var rateTable: RateTable { DefaultRates.table }
+    /// Effective per-model rates from the environment; falls back to defaults.
+    private var rateTable: RateTable { rates?.table ?? DefaultRates.table }
 
     var body: some View {
         if let breakdown = stats?.breakdown, breakdown.monthly > 0 {

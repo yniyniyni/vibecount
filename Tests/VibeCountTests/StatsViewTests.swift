@@ -25,6 +25,19 @@ final class StatsViewTests: XCTestCase {
         render(StatsView().environment(UsageStats()))
     }
 
+    func testRendersWithCustomRates() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let day = Calendar.current.startOfDay(for: Date())
+        let stats = UsageStats()
+        stats.breakdown = UsageBreakdown(daily: 100, monthly: 300,
+                                         byDayModel: [day: ["Opus": TokenBreakdown(uncachedInput: 1_000_000)]])
+        let rates = Rates(store: RatesStore(directory: dir))
+        rates.update(["Opus": ModelRates(uncachedInput: 20, cachedInput: 0, cacheWrite: 0, output: 0)])
+        render(StatsView().environment(stats).environment(rates))
+    }
+
     // MARK: - tooltipCenter (pure geometry)
 
     private let container = CGSize(width: 260, height: 140)
