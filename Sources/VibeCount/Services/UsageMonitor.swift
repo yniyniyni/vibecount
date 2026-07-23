@@ -37,11 +37,11 @@ public struct TokenBreakdown: Sendable, Equatable {
 public struct UsageBreakdown: Sendable, Equatable {
     public let daily: Int
     public let monthly: Int
-    /// startOfDay → (model label → tokens), within the 30-day window. Days with
-    /// no usage are absent (the view zero-fills the axis).
-    public let byDayModel: [Date: [String: Int]]
+    /// startOfDay → (model label → token breakdown), within the 30-day window.
+    /// Canonical store; the Int views below and cost are derived from it.
+    public let byDayModel: [Date: [String: TokenBreakdown]]
 
-    public init(daily: Int, monthly: Int, byDayModel: [Date: [String: Int]] = [:]) {
+    public init(daily: Int, monthly: Int, byDayModel: [Date: [String: TokenBreakdown]] = [:]) {
         self.daily = daily
         self.monthly = monthly
         self.byDayModel = byDayModel
@@ -49,22 +49,27 @@ public struct UsageBreakdown: Sendable, Equatable {
 
     /// Total tokens per day.
     public var byDay: [Date: Int] {
-        byDayModel.mapValues { $0.values.reduce(0, +) }
+        byDayModel.mapValues { $0.values.reduce(0) { $0 + $1.total } }
     }
 
     /// Total tokens per model across the whole window.
     public var byModel: [String: Int] {
         var result: [String: Int] = [:]
         for models in byDayModel.values {
-            for (model, tokens) in models {
-                result[model, default: 0] += tokens
+            for (model, b) in models {
+                result[model, default: 0] += b.total
             }
         }
         return result
     }
 
-    /// The per-model breakdown for a single day (empty if that day has none).
+    /// Per-model token totals for a single day (empty if that day has none).
     public func models(on day: Date) -> [String: Int] {
+        (byDayModel[day] ?? [:]).mapValues(\.total)
+    }
+
+    /// Per-model token *breakdowns* for a single day (empty if none) — for cost.
+    public func breakdowns(on day: Date) -> [String: TokenBreakdown] {
         byDayModel[day] ?? [:]
     }
 }

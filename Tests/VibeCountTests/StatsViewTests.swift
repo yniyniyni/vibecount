@@ -16,7 +16,8 @@ final class StatsViewTests: XCTestCase {
         let day = Calendar.current.startOfDay(for: Date())
         let stats = UsageStats()
         stats.breakdown = UsageBreakdown(daily: 100, monthly: 300,
-                                         byDayModel: [day: ["Opus": 200, "Sonnet": 100]])
+                                         byDayModel: [day: ["Opus": TokenBreakdown(uncachedInput: 200),
+                                                            "Sonnet": TokenBreakdown(uncachedInput: 100)]])
         render(StatsView().environment(stats))
     }
 

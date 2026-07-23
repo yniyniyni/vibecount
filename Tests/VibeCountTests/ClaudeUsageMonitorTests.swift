@@ -232,6 +232,19 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.models(on: threeDaysAgo), ["Opus": 500])
     }
 
+    func testBreakdownCategoriesArePreservedPerModel() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1",
+                          model: "claude-opus-4-20250514",
+                          input: 100, cacheCreation: 40, cacheRead: 300, output: 20)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.breakdowns(on: today)["Opus"],
+                       TokenBreakdown(uncachedInput: 100, cachedInput: 300, cacheWrite: 40, output: 20))
+        XCTAssertEqual(usage.byModel["Opus"], 460)   // total count unchanged
+    }
+
     func testCrossFileDuplicateLandsInASingleDayBucket() async throws {
         let today = Calendar.current.startOfDay(for: Date())
         try writeSession(project: "orig", lines: [
