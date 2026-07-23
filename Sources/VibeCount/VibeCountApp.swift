@@ -24,7 +24,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
     var firestoreClient: FirestoreClient?
     let syncConfigStore = SyncConfigStore()
     var setupWindow: NSWindow?
-    var usageMonitor: UsageMonitor = ClaudeUsageMonitor()
+    var usageMonitor: UsageMonitor = CompositeUsageMonitor([
+        ClaudeUsageMonitor(),
+        CodexUsageMonitor(),
+    ])
     var updateTimer: Timer?
     var popover: NSPopover!
     var eventMonitor: Any?
