@@ -31,14 +31,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
 
-        // Fractional and whole-second ISO 8601 both occur in the wild; a
-        // single-formatter parse would silently drop (undercount) whichever
-        // variant it doesn't match. Mirrors FirestoreValue's timestamp decode.
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoPlainFormatter = ISO8601DateFormatter()
-        isoPlainFormatter.formatOptions = [.withInternetDateTime]
-
         // De-duplicate assistant rows GLOBALLY by "<messageId>:<requestId>":
         // forked/continued sessions copy history rows into new JSONL files, so
         // the same turn can appear in several files and must count once. Daily
@@ -60,8 +52,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 at: url,
                 startOfToday: startOfToday,
                 startOf30Days: startOf30Days,
-                isoFormatter: isoFormatter,
-                isoPlainFormatter: isoPlainFormatter,
                 dailyKeyed: &dailyKeyed,
                 dailyUnkeyed: &dailyUnkeyed,
                 monthlyKeyed: &monthlyKeyed,
@@ -108,8 +98,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         at url: URL,
         startOfToday: Date,
         startOf30Days: Date,
-        isoFormatter: ISO8601DateFormatter,
-        isoPlainFormatter: ISO8601DateFormatter,
         dailyKeyed: inout [String: Int],
         dailyUnkeyed: inout Int,
         monthlyKeyed: inout [String: Int],
@@ -148,8 +136,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String, type == "assistant",
                       let timestampStr = json["timestamp"] as? String,
-                      let date = isoFormatter.date(from: timestampStr)
-                        ?? isoPlainFormatter.date(from: timestampStr) else { return }
+                      let date = parseISO8601(timestampStr) else { return }
 
                 // Outside the monthly window → irrelevant to both totals.
                 guard date >= startOf30Days else { return }
@@ -182,47 +169,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                     monthlyUnkeyed += lineTokens
                     if isToday { dailyUnkeyed += lineTokens }
                 }
-            }
-        }
-    }
-}
-
-/// Streams `\n`-separated UTF-8 lines from a file via chunked reads, so a
-/// multi-megabyte session log is never held in memory at once.
-private final class LineReader {
-    private let handle: FileHandle
-    private var buffer = Data()
-    private var atEOF = false
-    private let chunkSize: Int
-
-    init(url: URL, chunkSize: Int = 64 * 1024) throws {
-        self.handle = try FileHandle(forReadingFrom: url)
-        self.chunkSize = chunkSize
-    }
-
-    deinit {
-        // A failed close on a read-only handle is inconsequential.
-        try? handle.close()
-    }
-
-    /// The next line without its trailing newline, or nil at end of file.
-    func nextLine() throws -> String? {
-        while true {
-            if let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
-                buffer.removeSubrange(buffer.startIndex...newlineIndex)
-                return String(decoding: lineData, as: UTF8.self)
-            }
-            if atEOF {
-                guard !buffer.isEmpty else { return nil }
-                let lineData = buffer
-                buffer = Data()
-                return String(decoding: lineData, as: UTF8.self)
-            }
-            if let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty {
-                buffer.append(chunk)
-            } else {
-                atEOF = true
             }
         }
     }
