@@ -31,14 +31,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
             return DailyMonthlyUsage(daily: 0, monthly: 0)
         }
 
-        // Fractional and whole-second ISO 8601 both occur in the wild; a
-        // single-formatter parse would silently drop (undercount) whichever
-        // variant it doesn't match. Mirrors FirestoreValue's timestamp decode.
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoPlainFormatter = ISO8601DateFormatter()
-        isoPlainFormatter.formatOptions = [.withInternetDateTime]
-
         // De-duplicate assistant rows GLOBALLY by "<messageId>:<requestId>":
         // forked/continued sessions copy history rows into new JSONL files, so
         // the same turn can appear in several files and must count once. Daily
@@ -60,8 +52,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                 at: url,
                 startOfToday: startOfToday,
                 startOf30Days: startOf30Days,
-                isoFormatter: isoFormatter,
-                isoPlainFormatter: isoPlainFormatter,
                 dailyKeyed: &dailyKeyed,
                 dailyUnkeyed: &dailyUnkeyed,
                 monthlyKeyed: &monthlyKeyed,
@@ -108,8 +98,6 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         at url: URL,
         startOfToday: Date,
         startOf30Days: Date,
-        isoFormatter: ISO8601DateFormatter,
-        isoPlainFormatter: ISO8601DateFormatter,
         dailyKeyed: inout [String: Int],
         dailyUnkeyed: inout Int,
         monthlyKeyed: inout [String: Int],
@@ -148,8 +136,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String, type == "assistant",
                       let timestampStr = json["timestamp"] as? String,
-                      let date = isoFormatter.date(from: timestampStr)
-                        ?? isoPlainFormatter.date(from: timestampStr) else { return }
+                      let date = parseISO8601(timestampStr) else { return }
 
                 // Outside the monthly window → irrelevant to both totals.
                 guard date >= startOf30Days else { return }
