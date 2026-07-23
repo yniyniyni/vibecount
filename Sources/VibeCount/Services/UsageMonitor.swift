@@ -1,5 +1,34 @@
 import Foundation
 
+/// Billable token categories, unified across providers. The existing per-row
+/// token *count* is `total`, so counts shown by the chart/list stay unchanged.
+public struct TokenBreakdown: Sendable, Equatable {
+    public var uncachedInput: Int
+    public var cachedInput: Int
+    public var cacheWrite: Int
+    public var output: Int
+
+    public init(uncachedInput: Int = 0, cachedInput: Int = 0, cacheWrite: Int = 0, output: Int = 0) {
+        self.uncachedInput = uncachedInput
+        self.cachedInput = cachedInput
+        self.cacheWrite = cacheWrite
+        self.output = output
+    }
+
+    public static let zero = TokenBreakdown()
+    public var total: Int { uncachedInput + cachedInput + cacheWrite + output }
+
+    public static func + (lhs: TokenBreakdown, rhs: TokenBreakdown) -> TokenBreakdown {
+        TokenBreakdown(
+            uncachedInput: lhs.uncachedInput + rhs.uncachedInput,
+            cachedInput: lhs.cachedInput + rhs.cachedInput,
+            cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+            output: lhs.output + rhs.output)
+    }
+
+    public mutating func add(_ other: TokenBreakdown) { self = self + other }
+}
+
 /// Daily and 30-day rolling token totals, plus a per-day / per-model breakdown —
 /// all computed together in a single scan. `daily` and `monthly` keep their
 /// original meaning (today's total, trailing-30-day total). `byDayModel` is the
