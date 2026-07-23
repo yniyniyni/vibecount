@@ -5,12 +5,20 @@ import XCTest
 final class StubURLProtocol: URLProtocol {
     // Test-only global; tests run serially within this case.
     nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
+    /// Simulates a transport-level failure: when this returns a non-nil error
+    /// for a request, the load fails with it (as URLSession does for a dropped
+    /// connection) instead of producing an HTTP response.
+    nonisolated(unsafe) static var failure: (@Sendable (URLRequest) -> URLError?)?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
     override func startLoading() {
+        if let error = Self.failure?(request) {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
         let (status, data) = Self.handler?(request) ?? (500, Data())
         let response = HTTPURLResponse(
             url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
@@ -60,6 +68,7 @@ final class FirestoreClientTests: XCTestCase {
 
     override func tearDownWithError() throws {
         StubURLProtocol.handler = nil
+        StubURLProtocol.failure = nil
         try? FileManager.default.removeItem(at: directory)
         try super.tearDownWithError()
     }
@@ -327,6 +336,67 @@ final class FirestoreClientTests: XCTestCase {
         let doc = try await client.getDocument(path: "users/abc")
         XCTAssertNotNil(doc)
         XCTAssertEqual(firestoreCalls, 2)
+    }
+
+    func testTransientNetworkErrorIsRetriedOnceThenSucceeds() async throws {
+        // A stale pooled connection surfaces as URLError.networkConnectionLost
+        // (-1005): the first attempt fails at the transport layer, an immediate
+        // retry on a fresh connection succeeds. The client must retry and return
+        // the success — never surface the transient error.
+        nonisolated(unsafe) var firestoreAttempts = 0
+        StubURLProtocol.failure = { request in
+            guard request.url!.host!.contains("firestore") else { return nil }
+            firestoreAttempts += 1
+            return firestoreAttempts == 1 ? URLError(.networkConnectionLost) : nil
+        }
+        stubAuthAndFirestore { _ in
+            (200, Self.json([
+                "name": "projects/test-project/databases/(default)/documents/users/abc",
+                "fields": [:],
+            ]))
+        }
+        let doc = try await client.getDocument(path: "users/abc")
+        XCTAssertNotNil(doc)
+        XCTAssertEqual(firestoreAttempts, 2, "a transient network error must be retried once")
+    }
+
+    func testPersistentTransientErrorSurfacesAfterASingleRetry() async throws {
+        // If the retry also fails, the error surfaces — the retry is bounded to
+        // one, never an unbounded loop.
+        nonisolated(unsafe) var firestoreAttempts = 0
+        StubURLProtocol.failure = { request in
+            guard request.url!.host!.contains("firestore") else { return nil }
+            firestoreAttempts += 1
+            return URLError(.networkConnectionLost)
+        }
+        stubAuthAndFirestore { _ in (200, Self.json([:])) }
+        do {
+            _ = try await client.getDocument(path: "users/abc")
+            XCTFail("expected the transient error to surface after the retry")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .networkConnectionLost)
+        }
+        XCTAssertEqual(firestoreAttempts, 2, "exactly one retry, then surface")
+    }
+
+    func testCancellationErrorIsNotRetried() async throws {
+        // A backend switch cancels in-flight requests; URLSession reports that as
+        // URLError.cancelled. It must propagate immediately, never be retried as
+        // if it were a transient blip.
+        nonisolated(unsafe) var firestoreAttempts = 0
+        StubURLProtocol.failure = { request in
+            guard request.url!.host!.contains("firestore") else { return nil }
+            firestoreAttempts += 1
+            return URLError(.cancelled)
+        }
+        stubAuthAndFirestore { _ in (200, Self.json([:])) }
+        do {
+            _ = try await client.getDocument(path: "users/abc")
+            XCTFail("expected the cancellation to surface")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        XCTAssertEqual(firestoreAttempts, 1, "cancellation must not be retried")
     }
 
     func testDocumentPathsArePercentEncodedInURLs() async throws {
