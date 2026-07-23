@@ -2,14 +2,16 @@
 
 **A native macOS menu-bar leaderboard for Claude Code token usage.**
 
-VibeCount reads Claude Code session logs on your Mac, shows how many tokens you
-have used today and over the last 30 days, and optionally syncs those aggregate
-totals with friends.
+VibeCount reads Claude Code and Codex session logs on your Mac, shows how many
+tokens you have used today and over the last 30 days, and optionally syncs
+those aggregate totals with friends.
 
 ## What it does
 
 - Lives in the macOS menu bar with your current daily token count.
-- Reads local Claude Code JSONL logs from `~/.claude/projects`.
+- Reads local Claude Code logs from `~/.claude/projects` and OpenAI Codex CLI
+  logs from `~/.codex/sessions` and `~/.codex/archived_sessions`.
+- Combines Claude Code and Codex token usage into one daily and 30-day total.
 - Ranks today and rolling 30-day usage in a compact native dashboard.
 - Works locally with no account or backend.
 - Syncs leaderboards through the shared VibeCount cloud or a self-hosted
