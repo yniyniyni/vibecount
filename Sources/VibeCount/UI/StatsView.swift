@@ -12,10 +12,14 @@ struct StatsView: View {
     @State private var selectedDay: Date?
     @State private var hoverLocation: CGPoint = .zero
 
+    /// Effective per-model rates. Phase B swaps this for the environment `Rates`.
+    private var rateTable: RateTable { DefaultRates.table }
+
     var body: some View {
         if let breakdown = stats?.breakdown, breakdown.monthly > 0 {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    costSection(breakdown)
                     dailySection(breakdown)
                     modelSection(breakdown)
                 }
@@ -31,6 +35,29 @@ struct StatsView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // Estimated spend: today and the 30-day total.
+    private func costSection(_ breakdown: UsageBreakdown) -> some View {
+        let today = Calendar.current.startOfDay(for: Date())
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Estimated cost")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                costTile("Today", breakdown.cost(on: today, table: rateTable))
+                Spacer()
+                costTile("30 days", breakdown.totalCost(table: rateTable))
+            }
+            Text("Estimated · rates are editable")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func costTile(_ label: String, _ amount: Double) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(amount.formattedUSD).font(.headline).fontDesign(.rounded)
         }
     }
 
@@ -104,12 +131,13 @@ struct StatsView: View {
     private func modelSection(_ breakdown: UsageBreakdown) -> some View {
         let rows = breakdown.byModel.sorted { $0.value > $1.value }
         let maxTokens = rows.first?.value ?? 1
+        let costs = breakdown.costByModel(table: rateTable)
         return VStack(alignment: .leading, spacing: 6) {
             Text("By model")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(rows, id: \.key) { label, tokens in
                 HStack(spacing: 8) {
-                    Text(label).frame(width: 64, alignment: .leading)
+                    Text(label).frame(width: 60, alignment: .leading).lineLimit(1)
                     GeometryReader { geo in
                         Capsule()
                             .fill(Color.accentColor.opacity(0.7))
@@ -119,6 +147,9 @@ struct StatsView: View {
                     .frame(height: 10)
                     Text(tokens.formattedTokenCount)
                         .font(.caption).fontDesign(.monospaced)
+                        .frame(width: 48, alignment: .trailing)
+                    Text((costs[label] ?? 0).formattedUSD)
+                        .font(.caption).fontDesign(.monospaced).foregroundStyle(.secondary)
                         .frame(width: 56, alignment: .trailing)
                 }
             }
@@ -127,24 +158,31 @@ struct StatsView: View {
 
     // MARK: - Hover tooltip
 
-    /// A single day's detail: total plus its per-model rows, sorted desc.
+    /// A single day's detail: total tokens/cost plus its per-model rows, desc.
     struct DayDetail {
         let day: Date
         let total: Int
-        let models: [(label: String, tokens: Int)]
+        let cost: Double
+        let models: [(label: String, tokens: Int, cost: Double)]
     }
 
     private func dayDetail(for day: Date, breakdown: UsageBreakdown) -> DayDetail {
-        let models = breakdown.models(on: day)
-        let sorted = models.sorted { $0.value > $1.value }.map { (label: $0.key, tokens: $0.value) }
-        return DayDetail(day: day, total: models.values.reduce(0, +), models: sorted)
+        let tokens = breakdown.models(on: day)
+        let costs = breakdown.costByModel(on: day, table: rateTable)
+        let sorted = tokens.sorted { $0.value > $1.value }
+            .map { (label: $0.key, tokens: $0.value, cost: costs[$0.key] ?? 0) }
+        return DayDetail(
+            day: day,
+            total: tokens.values.reduce(0, +),
+            cost: breakdown.cost(on: day, table: rateTable),
+            models: sorted)
     }
 
     private func tooltip(_ detail: DayDetail) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(detail.day, format: .dateTime.month().day())
                 .font(.caption.bold())
-            Text("\(detail.total.formattedTokenCount) total")
+            Text("\(detail.total.formattedTokenCount) · \(detail.cost.formattedUSD)")
                 .font(.caption2).foregroundStyle(.secondary)
             if detail.models.isEmpty {
                 Text("No usage").font(.caption2).foregroundStyle(.secondary)
@@ -155,6 +193,8 @@ struct StatsView: View {
                         Spacer(minLength: 10)
                         Text(model.tokens.formattedTokenCount)
                             .font(.caption2).fontDesign(.monospaced)
+                        Text(model.cost.formattedUSD)
+                            .font(.caption2).fontDesign(.monospaced).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -184,7 +224,7 @@ struct StatsView: View {
 
     // MARK: - Layout helpers (pure — unit tested)
 
-    static let tooltipContentWidth: CGFloat = 150
+    static let tooltipContentWidth: CGFloat = 185
 
     /// Centers the tooltip near the cursor: to its right (flipping left near the
     /// right edge) and above it (flipping below near the top), always fully
