@@ -2,14 +2,15 @@ import XCTest
 @testable import VibeCount
 
 final class PricingTests: XCTestCase {
-    // input $10/Mtok, cached $1, cacheWrite $12.5, output $30
-    private let rates = ModelRates(uncachedInput: 10, cachedInput: 1, cacheWrite: 12.5, output: 30)
+    // input $10/Mtok, cached $1, 5m-write $12.5, 1h-write $20, output $30
+    private let rates = ModelRates(uncachedInput: 10, cachedInput: 1, cacheWrite: 12.5, cacheWrite1h: 20, output: 30)
 
     func testCostSumsEachCategoryAtItsRate() {
-        // 1M uncached ($10) + 2M cached ($2) + 0.4M write ($5) + 0.5M output ($15) = $32
+        // 1M uncached ($10) + 2M cached ($2) + 0.4M 5m-write ($5) + 0.1M 1h-write ($2)
+        // + 0.5M output ($15) = $34
         let b = TokenBreakdown(uncachedInput: 1_000_000, cachedInput: 2_000_000,
-                               cacheWrite: 400_000, output: 500_000)
-        XCTAssertEqual(Pricing.cost(b, rates: rates), 32.0, accuracy: 1e-9)
+                               cacheWrite: 400_000, cacheWrite1h: 100_000, output: 500_000)
+        XCTAssertEqual(Pricing.cost(b, rates: rates), 34.0, accuracy: 1e-9)
     }
 
     func testUnknownModelCostsZero() {

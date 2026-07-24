@@ -339,7 +339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         window.title = "Model Pricing"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 520, height: 560))
+        window.setContentSize(NSSize(width: 600, height: 560))
         window.center()
         pricingWindow = window
         NSApp.activate(ignoringOtherApps: true)

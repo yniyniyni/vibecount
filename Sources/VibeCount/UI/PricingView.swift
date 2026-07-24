@@ -33,18 +33,19 @@ struct PricingView: View {
             }
 
             ScrollView {
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
                     GridRow {
                         Text("Model").font(.caption.bold())
-                        header("Input"); header("Cached"); header("Cache write"); header("Output")
+                        header("Input"); header("Cached"); header("Cache 5m"); header("Cache 1h"); header("Output")
                     }
-                    Divider().gridCellColumns(5)
+                    Divider().gridCellColumns(6)
                     ForEach($rows) { $row in
                         GridRow {
-                            Text(row.id).lineLimit(1).frame(width: 96, alignment: .leading)
+                            Text(row.id).lineLimit(1).frame(width: 92, alignment: .leading)
                             rateField($row.rates.uncachedInput)
                             rateField($row.rates.cachedInput)
                             rateField($row.rates.cacheWrite)
+                            rateField($row.rates.cacheWrite1h)
                             rateField($row.rates.output)
                         }
                     }
@@ -60,18 +61,18 @@ struct PricingView: View {
             }
         }
         .padding(16)
-        .frame(width: 520, height: 560)
+        .frame(width: 600, height: 560)
     }
 
     private func header(_ title: String) -> some View {
-        Text(title).font(.caption.bold()).frame(width: 74, alignment: .trailing)
+        Text(title).font(.caption.bold()).frame(width: 66, alignment: .trailing)
     }
 
     private func rateField(_ value: Binding<Double>) -> some View {
         TextField("", value: value, format: .number)
             .multilineTextAlignment(.trailing)
             .textFieldStyle(.roundedBorder)
-            .frame(width: 74)
+            .frame(width: 66)
     }
 
     /// Persist only rows that differ from the shipped defaults.
