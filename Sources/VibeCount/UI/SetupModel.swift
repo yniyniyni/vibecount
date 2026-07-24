@@ -17,6 +17,8 @@ struct SetupActions {
     var signInWithGoogle: () async throws -> String?
     /// Closes the setup window.
     var dismiss: () -> Void
+    /// Builds a fresh AutoHostSetup wired to real services (AppDelegate).
+    var makeAutoHostSetup: () -> AutoHostSetup
 }
 
 /// Drives the setup window: welcome → host wizard / join / settings.
@@ -29,9 +31,12 @@ final class SetupModel {
         /// Connected to VibeCount cloud but Google link is still required.
         case needsGoogleSignIn
     }
+    enum HostMode: Equatable { case automatic, manual }
 
     var route: Route
     var phase: Phase = .idle
+    var hostMode: HostMode = .automatic
+    private(set) var autoSetup: AutoHostSetup?
     var projectID = ""
     var apiKey = ""
     var joinText = ""
@@ -144,6 +149,19 @@ final class SetupModel {
             config.googleClientSecret = clientSecret
         }
         await validateAndCommit(config)
+    }
+
+    /// Runs the automatic CLI-driven host setup. On completion, refreshes the
+    /// stored config + invite code so the Done screen shows the share link —
+    /// the same post-success refresh the manual path does.
+    func startAutoHost() async {
+        let setup = autoSetup ?? actions.makeAutoHostSetup()
+        autoSetup = setup
+        await setup.run()
+        if setup.finished {
+            ownInviteCode = actions.fetchOwnInviteCode() ?? ownInviteCode
+            phase = .success
+        }
     }
 
     func submitJoin() async {

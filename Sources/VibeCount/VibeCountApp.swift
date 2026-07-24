@@ -421,6 +421,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 dismiss: { [weak self] in
                     self?.setupWindow?.close()
                     self?.setupWindow = nil
+                },
+                // TODO(Task 8): replace with the real wiring (CLI locate/run,
+                // Google OAuth device flow, gcloud access tokens, bundled
+                // rules path, commitSyncConfig). This placeholder only keeps
+                // the app compiling — automatic host mode is not yet usable.
+                makeAutoHostSetup: {
+                    AutoHostSetup(dependencies: AutoSetupDependencies(
+                        locateCLI: { nil },
+                        makeCLI: { _, _ in fatalError("Task 8: real FirebaseCLI wiring") },
+                        signIn: { throw GoogleSignInError.notAvailable },
+                        accessToken: { _ in throw GoogleSignInError.notAvailable },
+                        enableAnonymous: { _, _ in throw GoogleSignInError.notAvailable },
+                        rulesPath: { nil },
+                        commit: { _ in .failure(.firestoreMissing) },
+                        newProjectID: { "vibecount-\(UUID().uuidString.prefix(8).lowercased())" }))
                 }))
         let hostingController = NSHostingController(rootView: SetupView(model: model))
         // NSHostingController defaults to `.preferredContentSize`, which makes it
