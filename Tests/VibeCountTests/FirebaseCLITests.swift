@@ -82,3 +82,57 @@ final class FirebaseCLITests: XCTestCase {
         XCTAssertEqual(result.exitCode, 3)
     }
 }
+
+extension FirebaseCLITests {
+    private func cli(_ results: [CommandResult],
+                     _ recorder: StubRunner.Recorder = .init()) -> FirebaseCLI {
+        FirebaseCLI(binaryPath: "/bin/firebase", token: "tok",
+                    runner: StubRunner(results: results, recorder: recorder))
+    }
+
+    func testSdkConfigParsesProjectAndKey() async throws {
+        let json = """
+        {"result":{"sdkConfig":{"projectId":"vibecount-abc","apiKey":"AIzaXYZ"}}}
+        """
+        let config = try await cli([CommandResult(exitCode: 0, stdout: json, stderr: "")])
+            .sdkConfig(projectID: "vibecount-abc", appID: "1:2:web:3")
+        XCTAssertEqual(config, FirebaseConfig(apiKey: "AIzaXYZ", projectID: "vibecount-abc"))
+    }
+
+    func testCreateWebAppParsesAppId() async throws {
+        let json = #"{"result":{"appId":"1:2:web:3","displayName":"VibeCount"}}"#
+        let appID = try await cli([CommandResult(exitCode: 0, stdout: json, stderr: "")])
+            .createWebApp(projectID: "p", displayName: "VibeCount")
+        XCTAssertEqual(appID, "1:2:web:3")
+    }
+
+    func testListProjectsParsesArray() async throws {
+        let json = """
+        {"result":[{"projectId":"p1","displayName":"One"},{"projectId":"p2","displayName":"Two"}]}
+        """
+        let projects = try await cli([CommandResult(exitCode: 0, stdout: json, stderr: "")])
+            .listProjects()
+        XCTAssertEqual(projects, [
+            FirebaseProjectSummary(projectID: "p1", displayName: "One"),
+            FirebaseProjectSummary(projectID: "p2", displayName: "Two"),
+        ])
+    }
+
+    func testCreateProjectAlreadyExistsIsSuccess() async throws {
+        let runner = cli([CommandResult(
+            exitCode: 1, stdout: "",
+            stderr: "Error: Failed to create project because there is already a project with ID p")])
+        // Should NOT throw — idempotent.
+        try await runner.createProject(projectID: "p", displayName: "VibeCount")
+    }
+
+    func testCreateFirestorePassesLocationFlag() async throws {
+        let recorder = StubRunner.Recorder()
+        let runner = cli([CommandResult(exitCode: 0, stdout: "", stderr: "")], recorder)
+        try await runner.createFirestore(projectID: "p", location: "eur3")
+        let args = recorder.calls.first?.arguments ?? []
+        XCTAssertTrue(args.contains("firestore:databases:create"))
+        XCTAssertTrue(args.contains("eur3"))
+        XCTAssertTrue(args.contains("p"))
+    }
+}
