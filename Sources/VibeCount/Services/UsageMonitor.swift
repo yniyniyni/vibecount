@@ -5,24 +5,30 @@ import Foundation
 public struct TokenBreakdown: Sendable, Equatable {
     public var uncachedInput: Int
     public var cachedInput: Int
+    /// 5-minute cache writes (Anthropic 1.25× input). OpenAI has none.
     public var cacheWrite: Int
+    /// 1-hour cache writes (Anthropic 2× input) — priced higher than 5-minute.
+    public var cacheWrite1h: Int
     public var output: Int
 
-    public init(uncachedInput: Int = 0, cachedInput: Int = 0, cacheWrite: Int = 0, output: Int = 0) {
+    public init(uncachedInput: Int = 0, cachedInput: Int = 0,
+                cacheWrite: Int = 0, cacheWrite1h: Int = 0, output: Int = 0) {
         self.uncachedInput = uncachedInput
         self.cachedInput = cachedInput
         self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
         self.output = output
     }
 
     public static let zero = TokenBreakdown()
-    public var total: Int { uncachedInput + cachedInput + cacheWrite + output }
+    public var total: Int { uncachedInput + cachedInput + cacheWrite + cacheWrite1h + output }
 
     public static func + (lhs: TokenBreakdown, rhs: TokenBreakdown) -> TokenBreakdown {
         TokenBreakdown(
             uncachedInput: lhs.uncachedInput + rhs.uncachedInput,
             cachedInput: lhs.cachedInput + rhs.cachedInput,
             cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+            cacheWrite1h: lhs.cacheWrite1h + rhs.cacheWrite1h,
             output: lhs.output + rhs.output)
     }
 

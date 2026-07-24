@@ -4,10 +4,11 @@ import Foundation
 public enum Pricing {
     /// Cost in USD for a breakdown at the given rates ($/Mtok).
     public static func cost(_ b: TokenBreakdown, rates: ModelRates) -> Double {
-        (Double(b.uncachedInput) * rates.uncachedInput
-         + Double(b.cachedInput) * rates.cachedInput
-         + Double(b.cacheWrite)  * rates.cacheWrite
-         + Double(b.output)      * rates.output) / 1_000_000
+        (Double(b.uncachedInput)  * rates.uncachedInput
+         + Double(b.cachedInput)  * rates.cachedInput
+         + Double(b.cacheWrite)   * rates.cacheWrite
+         + Double(b.cacheWrite1h) * rates.cacheWrite1h
+         + Double(b.output)       * rates.output) / 1_000_000
     }
 
     /// Cost for a model's breakdown; an unknown label contributes $0.

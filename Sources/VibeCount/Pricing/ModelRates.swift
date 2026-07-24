@@ -5,13 +5,18 @@ import Foundation
 public struct ModelRates: Sendable, Equatable, Codable {
     public var uncachedInput: Double
     public var cachedInput: Double
+    /// 5-minute cache-write price (Anthropic 1.25× input).
     public var cacheWrite: Double
+    /// 1-hour cache-write price (Anthropic 2× input).
+    public var cacheWrite1h: Double
     public var output: Double
 
-    public init(uncachedInput: Double, cachedInput: Double, cacheWrite: Double, output: Double) {
+    public init(uncachedInput: Double, cachedInput: Double,
+                cacheWrite: Double, cacheWrite1h: Double = 0, output: Double) {
         self.uncachedInput = uncachedInput
         self.cachedInput = cachedInput
         self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
         self.output = output
     }
 }
@@ -30,11 +35,12 @@ public typealias RateTable = [String: ModelRates]
 public enum DefaultRates {
     public static let table: RateTable = [
         // Anthropic (Claude). Opus = current 4.5–4.8 pricing (Opus 4.1/4 are
-        // deprecated at $15/$75). Sonnet = standard rate.
-        "Opus":   ModelRates(uncachedInput: 5,  cachedInput: 0.50, cacheWrite: 6.25,  output: 25),
-        "Sonnet": ModelRates(uncachedInput: 3,  cachedInput: 0.30, cacheWrite: 3.75,  output: 15),
-        "Haiku":  ModelRates(uncachedInput: 1,  cachedInput: 0.10, cacheWrite: 1.25,  output: 5),
-        "Fable":  ModelRates(uncachedInput: 10, cachedInput: 1.00, cacheWrite: 12.50, output: 50),
+        // deprecated at $15/$75). Sonnet = standard rate. cacheWrite = 5-minute
+        // (1.25× input); cacheWrite1h = 1-hour (2× input).
+        "Opus":   ModelRates(uncachedInput: 5,  cachedInput: 0.50, cacheWrite: 6.25,  cacheWrite1h: 10,  output: 25),
+        "Sonnet": ModelRates(uncachedInput: 3,  cachedInput: 0.30, cacheWrite: 3.75,  cacheWrite1h: 6,   output: 15),
+        "Haiku":  ModelRates(uncachedInput: 1,  cachedInput: 0.10, cacheWrite: 1.25,  cacheWrite1h: 2,   output: 5),
+        "Fable":  ModelRates(uncachedInput: 10, cachedInput: 1.00, cacheWrite: 12.50, cacheWrite1h: 20,  output: 50),
         // OpenAI (GPT / Codex) — no separate cache-write price (0).
         "GPT 5.6 Sol":   ModelRates(uncachedInput: 5.00, cachedInput: 0.50, cacheWrite: 0, output: 30),
         "GPT 5.6 Terra": ModelRates(uncachedInput: 2.50, cachedInput: 0.25, cacheWrite: 0, output: 15),

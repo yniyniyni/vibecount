@@ -164,14 +164,27 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                       let usage = message["usage"] as? [String: Any] else { return }
 
                 let input = (usage["input_tokens"] as? Int) ?? 0
-                let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
                 let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
                 let output = (usage["output_tokens"] as? Int) ?? 0
 
-                // Map Claude's usage fields onto the unified billable categories:
-                // cache_read → cachedInput, cache_creation → cacheWrite.
+                // Cache writes are priced differently by duration: 5-minute is
+                // 1.25× input, 1-hour is 2× input. The `cache_creation` object
+                // carries the split; older logs only have the flat total, which
+                // we treat as 5-minute.
+                let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+                var write5m = cacheCreate
+                var write1h = 0
+                if let cc = usage["cache_creation"] as? [String: Any] {
+                    let e5 = (cc["ephemeral_5m_input_tokens"] as? Int) ?? 0
+                    let e1 = (cc["ephemeral_1h_input_tokens"] as? Int) ?? 0
+                    if e5 + e1 > 0 { write5m = e5; write1h = e1 }
+                }
+
+                // Map onto the unified billable categories: cache_read →
+                // cachedInput, 5m/1h cache creation → cacheWrite / cacheWrite1h.
                 let breakdown = TokenBreakdown(
-                    uncachedInput: input, cachedInput: cacheRead, cacheWrite: cacheCreate, output: output)
+                    uncachedInput: input, cachedInput: cacheRead,
+                    cacheWrite: write5m, cacheWrite1h: write1h, output: output)
                 if breakdown.total == 0 { return }
 
                 let day = calendar.startOfDay(for: date)

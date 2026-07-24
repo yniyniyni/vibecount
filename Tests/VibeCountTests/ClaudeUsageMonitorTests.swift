@@ -45,14 +45,23 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         input: Int = 0,
         cacheCreation: Int = 0,
         cacheRead: Int = 0,
-        output: Int = 0
+        output: Int = 0,
+        cache5m: Int? = nil,
+        cache1h: Int? = nil
     ) -> String {
-        let usage: [String: Any] = [
+        var usage: [String: Any] = [
             "input_tokens": input,
             "cache_creation_input_tokens": cacheCreation,
             "cache_read_input_tokens": cacheRead,
             "output_tokens": output
         ]
+        // Real logs carry a 5m/1h split in a `cache_creation` object.
+        if let cache5m, let cache1h {
+            usage["cache_creation"] = [
+                "ephemeral_5m_input_tokens": cache5m,
+                "ephemeral_1h_input_tokens": cache1h,
+            ]
+        }
         var message: [String: Any] = ["usage": usage]
         if let messageId { message["id"] = messageId }
         if let model { message["model"] = model }
@@ -243,6 +252,32 @@ final class ClaudeUsageMonitorTests: XCTestCase {
         XCTAssertEqual(usage.breakdowns(on: today)["Opus"],
                        TokenBreakdown(uncachedInput: 100, cachedInput: 300, cacheWrite: 40, output: 20))
         XCTAssertEqual(usage.byModel["Opus"], 460)   // total count unchanged
+    }
+
+    func testSplitsCacheCreationIntoFiveMinuteAndOneHourWrites() async throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1",
+                          model: "claude-opus-4-8", input: 2, cacheCreation: 100, cacheRead: 300, output: 20,
+                          cache5m: 30, cache1h: 70)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.breakdowns(on: today)["Opus"],
+                       TokenBreakdown(uncachedInput: 2, cachedInput: 300,
+                                      cacheWrite: 30, cacheWrite1h: 70, output: 20))
+    }
+
+    func testCacheCreationWithoutSplitCountsAsFiveMinute() async throws {
+        // Legacy logs lack the `cache_creation` object — treat the flat count as 5m.
+        let today = Calendar.current.startOfDay(for: Date())
+        try writeSession(project: "p", lines: [
+            assistantLine(timestamp: timestamp(daysBeforeToday: 0), messageId: "m1", requestId: "r1",
+                          model: "claude-opus-4-8", input: 2, cacheCreation: 100, cacheRead: 0, output: 0)
+        ])
+        let usage = try await fetch()
+        XCTAssertEqual(usage.breakdowns(on: today)["Opus"],
+                       TokenBreakdown(uncachedInput: 2, cachedInput: 0,
+                                      cacheWrite: 100, cacheWrite1h: 0, output: 0))
     }
 
     func testCrossFileDuplicateLandsInASingleDayBucket() async throws {
