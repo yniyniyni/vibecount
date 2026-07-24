@@ -20,7 +20,7 @@ service cloud.firestore {
 
     function isValidUserDoc() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['displayName', 'latestDailyTokens', 'latestMonthlyTokens', 'lastUpdated'])
+      return d.keys().hasOnly(['displayName', 'latestDailyTokens', 'latestMonthlyTokens', 'latestDailyCost', 'latestMonthlyCost', 'lastUpdated'])
         && d.keys().hasAll(['displayName', 'latestDailyTokens', 'latestMonthlyTokens', 'lastUpdated'])
         && d.displayName is string
         && d.displayName.size() >= 1
@@ -33,6 +33,10 @@ service cloud.firestore {
         && d.latestMonthlyTokens is int
         && d.latestMonthlyTokens >= 0
         && d.latestMonthlyTokens <= 30000000000000
+        // Estimated spend in USD. Optional so a friend on an older client that
+        // doesn't compute cost still validates; capped like the token counts.
+        && (!('latestDailyCost' in d) || (d.latestDailyCost is number && d.latestDailyCost >= 0 && d.latestDailyCost <= 100000000))
+        && (!('latestMonthlyCost' in d) || (d.latestMonthlyCost is number && d.latestMonthlyCost >= 0 && d.latestMonthlyCost <= 100000000))
         && d.lastUpdated is timestamp;
     }
 
