@@ -66,4 +66,16 @@ final class SetupViewTests: XCTestCase {
                 makeAutoHostSetup: { Self.makeStubAutoHostSetup() }))
         XCTAssertNotNil(SetupView(model: model).body)
     }
+
+    func testHostDefaultsToAutomaticMode() {
+        let model = model(route: .host)
+        XCTAssertEqual(model.hostMode, .automatic)
+    }
+
+    func testSwitchingToManualPreservesRoute() {
+        let model = model(route: .host)
+        model.hostMode = .manual
+        XCTAssertEqual(model.route, .host)
+        XCTAssertEqual(model.hostMode, .manual)
+    }
 }

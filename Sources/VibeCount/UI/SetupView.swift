@@ -99,11 +99,90 @@ struct SetupView: View {
     // MARK: Host wizard
 
     private var host: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Host a Group").font(.title2.bold())
+            switch model.hostMode {
+            case .automatic: automaticHost
+            case .manual: manualHost
+            }
+        }
+        .padding(24)
+    }
+
+    @ViewBuilder private var automaticHost: some View {
+        if model.autoSetup?.installNeeded == true {
+            installPanel
+        } else if let setup = model.autoSetup {
+            progressList(setup)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("VibeCount will create a Firebase project for your group and configure it automatically. You'll sign in with Google once.")
+                Text("Requires the free Firebase CLI. Your usage totals stay in your own project.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Set up automatically") { Task { await model.startAutoHost() } }
+                    .buttonStyle(.borderedProminent)
+                Button("Set up manually instead") { model.hostMode = .manual }
+                    .buttonStyle(.link)
+            }
+        }
+        backLink
+    }
+
+    private func progressList(_ setup: AutoHostSetup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(AutoSetupStep.allCases, id: \.rawValue) { step in
+                HStack(spacing: 8) {
+                    stepIcon(setup.states[step] ?? .pending)
+                    Text(step.title)
+                    Spacer()
+                }
+            }
+            if setup.finished, let link = model.shareLink {
+                shareLinkRow(link)
+            } else if AutoSetupStep.allCases.contains(where: { if case .failed = setup.states[$0] { return true }; return false }) {
+                Button("Retry") { Task { await model.startAutoHost() } }
+                Button("Set up manually instead") { model.hostMode = .manual }
+                    .buttonStyle(.link)
+            }
+        }
+    }
+
+    @ViewBuilder private func stepIcon(_ state: StepState) -> some View {
+        switch state {
+        case .pending: Image(systemName: "circle").foregroundStyle(.secondary)
+        case .running: ProgressView().controlSize(.small)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed(let message):
+            HStack(spacing: 6) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            }
+            .help(message)
+        }
+    }
+
+    private var installPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Install the Firebase CLI").font(.headline)
+            Text("VibeCount needs the free Firebase command-line tool. Paste this into Terminal, then click Re-check:")
+            let command = "curl -sL https://firebase.tools | bash"
+            HStack {
+                Text(command).font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                Button("Copy") { Clipboard.copy(command) }
+            }
+            Button("Re-check") { Task { await model.startAutoHost() } }
+            Button("Set up manually instead") { model.hostMode = .manual }
+                .buttonStyle(.link)
+        }
+    }
+
+    private var manualHost: some View {
         // No inner ScrollView: the SetupView root already scrolls. Nesting a
         // second vertical scroll view here would break scrolling and reintroduce
         // an unstable content height.
         VStack(alignment: .leading, spacing: 14) {
-            Text("Host a Group").font(.title2.bold())
+            Button("Use automatic setup instead") { model.hostMode = .automatic }
+                .buttonStyle(.link)
             step(1, "Create a Firebase project",
                  "Any name works. Skip Google Analytics.",
                  link: URL(string: "https://console.firebase.google.com/")!)
