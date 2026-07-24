@@ -16,6 +16,8 @@ extension Friend {
         displayName: String,
         dailyTokens: Int,
         monthlyTokens: Int,
+        dailyCost: Double? = nil,
+        monthlyCost: Double? = nil,
         in context: ModelContext
     ) throws {
         var descriptor = FetchDescriptor<Friend>(predicate: #Predicate { $0.friendId == friendId })
@@ -24,6 +26,8 @@ extension Friend {
             existing.displayName = displayName
             existing.latestDailyTokens = dailyTokens
             existing.latestMonthlyTokens = monthlyTokens
+            existing.latestDailyCost = dailyCost
+            existing.latestMonthlyCost = monthlyCost
             existing.lastUpdated = Date()
         } else {
             let friend = Friend(
@@ -31,6 +35,8 @@ extension Friend {
                 displayName: displayName,
                 latestDailyTokens: dailyTokens,
                 latestMonthlyTokens: monthlyTokens,
+                latestDailyCost: dailyCost,
+                latestMonthlyCost: monthlyCost,
                 lastUpdated: Date()
             )
             context.insert(friend)
