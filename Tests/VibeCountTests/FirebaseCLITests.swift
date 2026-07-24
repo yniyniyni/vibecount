@@ -54,4 +54,31 @@ final class FirebaseCLITests: XCTestCase {
             XCTAssertEqual(error, .commandFailed(step: "version", message: "boom"))
         } catch { XCTFail("wrong error: \(error)") }
     }
+
+    /// Real-subprocess coverage for ProcessRunner itself (the stub above never
+    /// exercises Process/Pipe). Guards against the stdout/stderr pipe deadlock
+    /// and confirms exit codes/output still flow through correctly now that
+    /// the reads happen off the cooperative thread pool.
+    func testProcessRunnerRunsRealEchoAndCapturesOutput() async throws {
+        let echoPath = "/bin/echo"
+        guard FileManager.default.fileExists(atPath: echoPath) else {
+            throw XCTSkip("\(echoPath) not present on this runner")
+        }
+        let runner = ProcessRunner()
+        let result = try await runner.run(executable: echoPath, arguments: ["hello"], environment: [:])
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.stdout, "hello\n")
+        XCTAssertEqual(result.stderr, "")
+    }
+
+    func testProcessRunnerReportsNonZeroExitCode() async throws {
+        let shPath = "/bin/sh"
+        guard FileManager.default.fileExists(atPath: shPath) else {
+            throw XCTSkip("\(shPath) not present on this runner")
+        }
+        let runner = ProcessRunner()
+        let result = try await runner.run(
+            executable: shPath, arguments: ["-c", "exit 3"], environment: [:])
+        XCTAssertEqual(result.exitCode, 3)
+    }
 }
