@@ -447,9 +447,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 makeAutoHostSetup: { [weak self] in
                     AutoHostSetup(dependencies: AutoSetupDependencies(
                         locateCLI: { FirebaseCLI.locate() },
-                        makeCLI: { binary, refreshToken in
-                            FirebaseCLI(binaryPath: binary, token: refreshToken)
-                        },
+                        makeCLI: { binary in FirebaseCLI(binaryPath: binary) },
                         signIn: {
                             try await GCloudAuth().signIn(
                                 clientID: DefaultSyncProject.googleClientID,

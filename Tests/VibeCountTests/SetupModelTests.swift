@@ -49,7 +49,7 @@ final class SetupModelTests: XCTestCase {
                 dismiss: {},
                 makeAutoHostSetup: {
                     autoSetup ?? AutoHostSetup(dependencies: AutoSetupDependencies(
-                        locateCLI: { nil }, makeCLI: { _, _ in fatalError() },
+                        locateCLI: { nil }, makeCLI: { _ in fatalError() },
                         signIn: { GoogleTokens(accessToken: "", refreshToken: "", expiresIn: 0) },
                         accessToken: { _ in "" }, enableAnonymous: { _, _ in },
                         rulesPath: { nil }, commit: { _ in .success(()) }, newProjectID: { "p" }))
@@ -354,7 +354,7 @@ extension SetupModelTests {
         // A stub AutoHostSetup that commits a config and finishes.
         let auto = AutoHostSetup(dependencies: AutoSetupDependencies(
             locateCLI: { "/bin/firebase" },
-            makeCLI: { _, _ in StubCLI() },
+            makeCLI: { _ in StubCLI() },
             signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 1) },
             accessToken: { _ in "at" },
             enableAnonymous: { _, _ in },
@@ -383,6 +383,7 @@ extension SetupModelTests {
     // Minimal FirebaseCLIRunning stub so the real AutoHostSetup runs end to end.
     private final class StubCLI: FirebaseCLIRunning, @unchecked Sendable {
         func version() async throws -> String { "13" }
+        func currentUser() async throws -> String? { "me@example.com" }
         func createProject(projectID: String, displayName: String) async throws {}
         func listProjects() async throws -> [FirebaseProjectSummary] { [] }
         func createFirestore(projectID: String, location: String) async throws {}

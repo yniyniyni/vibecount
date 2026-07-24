@@ -30,23 +30,26 @@ final class FirebaseCLITests: XCTestCase {
         XCTAssertNil(found)
     }
 
-    func testVersionReturnsTrimmedStdoutAndInjectsToken() async throws {
+    func testVersionReturnsTrimmedStdoutAndDoesNotInjectFirebaseToken() async throws {
         let recorder = StubRunner.Recorder()
         let runner = StubRunner(
             results: [CommandResult(exitCode: 0, stdout: "13.0.1\n", stderr: "")],
             recorder: recorder)
-        let cli = FirebaseCLI(binaryPath: "/bin/firebase", token: "tok", runner: runner)
+        let cli = FirebaseCLI(binaryPath: "/bin/firebase", runner: runner)
         let version = try await cli.version()
         XCTAssertEqual(version, "13.0.1")
         XCTAssertEqual(recorder.calls.first?.arguments, ["--version"])
-        XCTAssertEqual(recorder.calls.first?.environment["FIREBASE_TOKEN"], "tok")
+        // The CLI authenticates via its own `firebase login`; we must NOT set
+        // FIREBASE_TOKEN (it refreshes with firebase-tools' own OAuth client and
+        // rejects a token minted for ours).
+        XCTAssertNil(recorder.calls.first?.environment["FIREBASE_TOKEN"])
     }
 
     func testNonZeroExitThrowsCommandFailed() async {
         let runner = StubRunner(
             results: [CommandResult(exitCode: 1, stdout: "", stderr: "boom")],
             recorder: .init())
-        let cli = FirebaseCLI(binaryPath: "/bin/firebase", token: "tok", runner: runner)
+        let cli = FirebaseCLI(binaryPath: "/bin/firebase", runner: runner)
         do {
             _ = try await cli.version()
             XCTFail("expected throw")
@@ -86,8 +89,24 @@ final class FirebaseCLITests: XCTestCase {
 extension FirebaseCLITests {
     private func cli(_ results: [CommandResult],
                      _ recorder: StubRunner.Recorder = .init()) -> FirebaseCLI {
-        FirebaseCLI(binaryPath: "/bin/firebase", token: "tok",
+        FirebaseCLI(binaryPath: "/bin/firebase",
                     runner: StubRunner(results: results, recorder: recorder))
+    }
+
+    func testCurrentUserParsesEmail() async throws {
+        let json = """
+        {"status":"success","result":[{"user":{"email":"me@example.com"}}]}
+        """
+        let user = try await cli([CommandResult(exitCode: 0, stdout: json, stderr: "")])
+            .currentUser()
+        XCTAssertEqual(user, "me@example.com")
+    }
+
+    func testCurrentUserNilWhenNoAccounts() async throws {
+        let json = #"{"status":"success","result":[]}"#
+        let user = try await cli([CommandResult(exitCode: 0, stdout: json, stderr: "")])
+            .currentUser()
+        XCTAssertNil(user)
     }
 
     func testSdkConfigParsesProjectAndKey() async throws {

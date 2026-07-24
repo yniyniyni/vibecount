@@ -6,6 +6,8 @@ final class AutoHostSetupTests: XCTestCase {
     private final class MockCLI: FirebaseCLIRunning, @unchecked Sendable {
         var failCreateFirestore = false
         var failVersion = false
+        /// nil simulates `firebase login` not being signed in.
+        var loggedInUser: String? = "me@example.com"
         var createdWebAppID = "1:2:web:3"
         var sdkConfigResult = FirebaseConfig(apiKey: "AIzaKey", projectID: "vibecount-new")
         var calls: [String] = []
@@ -14,6 +16,7 @@ final class AutoHostSetupTests: XCTestCase {
             if failVersion { throw FirebaseCLIError.commandFailed(step: "version", message: "broken binary") }
             return "13.0.0"
         }
+        func currentUser() async throws -> String? { calls.append("currentUser"); return loggedInUser }
         func createProject(projectID: String, displayName: String) async throws { calls.append("createProject:\(projectID)") }
         func listProjects() async throws -> [FirebaseProjectSummary] { [] }
         func createFirestore(projectID: String, location: String) async throws {
@@ -34,7 +37,7 @@ final class AutoHostSetupTests: XCTestCase {
                            commitResult: Result<Void, ConfigValidationError> = .success(())) -> AutoHostSetup {
         AutoHostSetup(dependencies: AutoSetupDependencies(
             locateCLI: { "/bin/firebase" },
-            makeCLI: { _, _ in cli },
+            makeCLI: { _ in cli },
             signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 3600) },
             accessToken: { _ in "at" },
             enableAnonymous: { projectID, _ in box.enabledFor.append(projectID) },
@@ -58,7 +61,7 @@ final class AutoHostSetupTests: XCTestCase {
     func testCLIMissingSetsInstallNeededAndStops() async {
         let cli = MockCLI(); let box = Box()
         let setup = AutoHostSetup(dependencies: AutoSetupDependencies(
-            locateCLI: { nil }, makeCLI: { _, _ in cli },
+            locateCLI: { nil }, makeCLI: { _ in cli },
             signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 3600) },
             accessToken: { _ in "at" }, enableAnonymous: { _, _ in },
             rulesPath: { "/tmp/x" }, commit: { _ in .success(()) }, newProjectID: { "p" }))
@@ -84,6 +87,29 @@ final class AutoHostSetupTests: XCTestCase {
         XCTAssertEqual(setup.states[.signIn], .pending)
         XCTAssertEqual(setup.states[.createProject], .pending)
         XCTAssertFalse(setup.finished)
+    }
+
+    func testCLINotLoggedInFailsCheckWithActionableMessage() async {
+        // Binary present and runnable, but `firebase login` has no account:
+        // preflight must fail (not installNeeded) and tell the user to log in.
+        let cli = MockCLI(); cli.loggedInUser = nil
+        let box = Box()
+        let setup = makeSetup(cli: cli, box: box)
+        await setup.run()
+        XCTAssertFalse(setup.installNeeded)
+        guard case .failed(let message) = setup.states[.checkCLI] else {
+            return XCTFail("expected checkCLI failed, got \(String(describing: setup.states[.checkCLI]))")
+        }
+        XCTAssertTrue(message.contains("firebase login"))
+        XCTAssertEqual(setup.states[.signIn], .pending)
+        XCTAssertFalse(setup.finished)
+    }
+
+    func testCheckCLISurfacesLoggedInUser() async {
+        let cli = MockCLI(); let box = Box()
+        let setup = makeSetup(cli: cli, box: box)
+        await setup.run()
+        XCTAssertEqual(setup.cliUser, "me@example.com")
     }
 
     func testFailureStopsChainAndMarksStepFailed() async {
@@ -130,7 +156,7 @@ final class AutoHostSetupTests: XCTestCase {
                 counter.count += 1
                 return counter.count == 1 ? "/bin/firebase" : nil
             },
-            makeCLI: { _, _ in cli },
+            makeCLI: { _ in cli },
             signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 3600) },
             accessToken: { _ in "at" },
             enableAnonymous: { projectID, _ in box.enabledFor.append(projectID) },

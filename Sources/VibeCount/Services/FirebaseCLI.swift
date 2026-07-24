@@ -8,16 +8,21 @@ enum FirebaseCLIError: Error, Equatable {
     case malformedOutput(String)
 }
 
-/// Thin, typed wrapper over the `firebase` CLI. Holds the resolved binary path
-/// and the FIREBASE_TOKEN to inject; all process work goes through `runner`.
+/// Thin, typed wrapper over the `firebase` CLI. Holds the resolved binary path;
+/// all process work goes through `runner`.
+///
+/// The CLI authenticates with its OWN `firebase login` session (read from the
+/// user's `~/.config`), NOT an injected token. Passing our app's OAuth refresh
+/// token via `FIREBASE_TOKEN` does not work: firebase-tools refreshes
+/// `FIREBASE_TOKEN` with its own hardcoded OAuth client, so a refresh token
+/// minted for our Desktop client is rejected (`invalid_grant`). The orchestrator
+/// therefore verifies `firebase login` up front instead.
 struct FirebaseCLI: Sendable {
     let binaryPath: String
-    let token: String
     let runner: CommandRunning
 
-    init(binaryPath: String, token: String, runner: CommandRunning = ProcessRunner()) {
+    init(binaryPath: String, runner: CommandRunning = ProcessRunner()) {
         self.binaryPath = binaryPath
-        self.token = token
         self.runner = runner
     }
 
@@ -37,13 +42,14 @@ struct FirebaseCLI: Sendable {
         return nil
     }
 
-    /// Runs the CLI with FIREBASE_TOKEN injected; throws commandFailed on a
-    /// non-zero exit (stderr as the message, stdout as fallback).
+    /// Runs the CLI (inheriting the ambient environment, including the user's
+    /// `firebase login` session); throws commandFailed on a non-zero exit
+    /// (stderr as the message, stdout as fallback).
     func execute(step: String, _ arguments: [String]) async throws -> String {
         let result = try await runner.run(
             executable: binaryPath,
             arguments: arguments,
-            environment: ["FIREBASE_TOKEN": token])
+            environment: [:])
         guard result.exitCode == 0 else {
             let message = result.stderr.isEmpty ? result.stdout : result.stderr
             throw FirebaseCLIError.commandFailed(
@@ -69,6 +75,9 @@ struct FirebaseProjectSummary: Equatable, Sendable {
 /// tested against a mock without a real CLI.
 protocol FirebaseCLIRunning: Sendable {
     func version() async throws -> String
+    /// The email of the account `firebase login` is signed in as, or nil when
+    /// no account is authorized (the user must run `firebase login`).
+    func currentUser() async throws -> String?
     func createProject(projectID: String, displayName: String) async throws
     func listProjects() async throws -> [FirebaseProjectSummary]
     func createFirestore(projectID: String, location: String) async throws
@@ -93,6 +102,17 @@ extension FirebaseCLI: FirebaseCLIRunning {
         try await executeIdempotent(
             step: "createProject",
             ["projects:create", projectID, "--display-name", displayName, "--json"])
+    }
+
+    func currentUser() async throws -> String? {
+        let stdout = try await execute(step: "currentUser", ["login:list", "--json"])
+        struct Payload: Decodable { let result: [Row] }
+        struct Row: Decodable { let user: User }
+        struct User: Decodable { let email: String? }
+        guard let rows = try? JSONDecoder().decode(Payload.self, from: Data(stdout.utf8)).result else {
+            throw FirebaseCLIError.malformedOutput(stdout)
+        }
+        return rows.compactMap { $0.user.email }.first
     }
 
     func listProjects() async throws -> [FirebaseProjectSummary] {
