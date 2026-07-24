@@ -126,6 +126,64 @@ final class FirestoreSyncServiceTests: XCTestCase {
         XCTAssertNil(service.status.lastError)
     }
 
+    func testPushWritesCostLocallyAndRemotely() async throws {
+        let service = await startedService()
+
+        try await service.pushLocalUsage(dailyTokens: 120, monthlyTokens: 4500,
+                                         dailyCost: 1.25, monthlyCost: 92.5)
+
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertEqual(rows.first?.latestDailyCost, 1.25)
+        XCTAssertEqual(rows.first?.latestMonthlyCost, 92.5)
+        let doc = await backend.document(path: "users/uid-1")
+        XCTAssertEqual(doc?.fields["latestDailyCost"], .double(1.25))
+        XCTAssertEqual(doc?.fields["latestMonthlyCost"], .double(92.5))
+    }
+
+    func testLeaderboardRefreshReadsFriendCost() async throws {
+        let service = await startedService()
+        await backend.setList(
+            [FirestoreDocument(name: "projects/t/databases/(default)/documents/users/uid-1/friends/friend-1",
+                               fields: [:])],
+            forPath: "users/uid-1/friends")
+        await backend.setDocument(path: "users/friend-1", fields: [
+            "displayName": .string("Bogdan"),
+            "latestDailyTokens": .integer(300),
+            "latestMonthlyTokens": .integer(9000),
+            "latestDailyCost": .double(3.5),
+            "latestMonthlyCost": .double(105.0),
+            "lastUpdated": .timestamp(Date()),
+        ])
+
+        try await service.pushLocalUsage(dailyTokens: 1, monthlyTokens: 1, dailyCost: 0, monthlyCost: 0)
+
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        let friend = rows.first { $0.friendId == "friend-1" }
+        XCTAssertEqual(friend?.latestDailyCost, 3.5)
+        XCTAssertEqual(friend?.latestMonthlyCost, 105.0)
+    }
+
+    func testLeaderboardRefreshLeavesCostNilForOlderClientFriend() async throws {
+        let service = await startedService()
+        await backend.setList(
+            [FirestoreDocument(name: "projects/t/databases/(default)/documents/users/uid-1/friends/friend-1",
+                               fields: [:])],
+            forPath: "users/uid-1/friends")
+        await backend.setDocument(path: "users/friend-1", fields: [
+            "displayName": .string("Old"),
+            "latestDailyTokens": .integer(300),
+            "latestMonthlyTokens": .integer(9000),
+            "lastUpdated": .timestamp(Date()),
+        ])
+
+        try await service.pushLocalUsage(dailyTokens: 1, monthlyTokens: 1)
+
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        let friend = rows.first { $0.friendId == "friend-1" }
+        XCTAssertNil(friend?.latestDailyCost)
+        XCTAssertNil(friend?.latestMonthlyCost)
+    }
+
     func testPushClampsNegativeTokensForUpload() async throws {
         let service = await startedService()
         try await service.pushLocalUsage(dailyTokens: -5, monthlyTokens: -1)

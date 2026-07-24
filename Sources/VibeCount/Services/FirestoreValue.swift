@@ -6,6 +6,7 @@ import Foundation
 enum FirestoreValue: Equatable, Sendable {
     case string(String)
     case integer(Int)
+    case double(Double)
     case timestamp(Date)
 
     nonisolated(unsafe) private static let iso8601Fractional: ISO8601DateFormatter = {
@@ -25,6 +26,7 @@ enum FirestoreValue: Equatable, Sendable {
         case .string(let string): ["stringValue": string]
         // Firestore's REST encoding carries int64 as a JSON string.
         case .integer(let int): ["integerValue": String(int)]
+        case .double(let double): ["doubleValue": double]
         case .timestamp(let date): ["timestampValue": Self.iso8601Fractional.string(from: date)]
         }
     }
@@ -37,6 +39,13 @@ enum FirestoreValue: Equatable, Sendable {
                 self = .integer(int)
             } else if let number = raw as? NSNumber {
                 self = .integer(number.intValue)
+            } else {
+                return nil
+            }
+        } else if let raw = json["doubleValue"] {
+            // Firestore sends floating-point values as bare JSON numbers.
+            if let number = raw as? NSNumber {
+                self = .double(number.doubleValue)
             } else {
                 return nil
             }
@@ -54,6 +63,10 @@ enum FirestoreValue: Equatable, Sendable {
 
     var integerValue: Int? {
         if case .integer(let int) = self { int } else { nil }
+    }
+
+    var doubleValue: Double? {
+        if case .double(let double) = self { double } else { nil }
     }
 }
 

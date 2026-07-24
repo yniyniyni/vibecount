@@ -177,9 +177,15 @@ public struct DashboardView: View {
 
                 Spacer()
 
-                Text(tab.tokens(for: friend).formattedTokenCount)
-                    .fontWeight(.bold)
-                    .fontDesign(.monospaced)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(tab.tokens(for: friend).formattedTokenCount)
+                        .fontWeight(.bold)
+                        .fontDesign(.monospaced)
+                    Text(tab.cost(for: friend).map(\.formattedUSD) ?? "—")
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .foregroundColor(.secondary)
+                }
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())

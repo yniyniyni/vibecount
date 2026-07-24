@@ -32,6 +32,34 @@ final class FriendUpsertTests: XCTestCase {
         XCTAssertEqual(rows.first?.latestMonthlyTokens, 100)
     }
 
+    func testStoresAndUpdatesCost() throws {
+        let context = try makeContext()
+
+        try Friend.upsert(friendId: "f1", displayName: "Ann", dailyTokens: 10, monthlyTokens: 100,
+                          dailyCost: 1.25, monthlyCost: 9.5, in: context)
+        try context.save()
+        var rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertEqual(rows.first?.latestDailyCost, 1.25)
+        XCTAssertEqual(rows.first?.latestMonthlyCost, 9.5)
+
+        // A later push with no cost (older-client friend) clears it back to nil.
+        try Friend.upsert(friendId: "f1", displayName: "Ann", dailyTokens: 20, monthlyTokens: 200,
+                          dailyCost: nil, monthlyCost: nil, in: context)
+        try context.save()
+        rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertNil(rows.first?.latestDailyCost)
+        XCTAssertNil(rows.first?.latestMonthlyCost)
+    }
+
+    func testCostDefaultsToNilWhenOmitted() throws {
+        let context = try makeContext()
+        try Friend.upsert(friendId: "f1", displayName: "Ann", dailyTokens: 10, monthlyTokens: 100, in: context)
+        try context.save()
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertNil(rows.first?.latestDailyCost)
+        XCTAssertNil(rows.first?.latestMonthlyCost)
+    }
+
     func testUpdatesInPlaceWhenPresent() throws {
         let context = try makeContext()
         try Friend.upsert(friendId: "f1", displayName: "Ann", dailyTokens: 10, monthlyTokens: 100, in: context)

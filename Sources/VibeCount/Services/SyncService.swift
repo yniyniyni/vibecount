@@ -66,7 +66,9 @@ public protocol SyncService: AnyObject {
     func stopSyncing()
 
     /// Persist the local user's usage locally and (when syncing) remotely.
-    func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws
+    /// `dailyCost` / `monthlyCost` are the estimated spend the local client
+    /// computed from its own rate table, in USD.
+    func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int, dailyCost: Double, monthlyCost: Double) async throws
 
     /// Resolve an invite code to a real user and add them as a friend.
     /// Throws a `SyncError` describing exactly why a code couldn't be added.
