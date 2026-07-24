@@ -18,6 +18,7 @@ final class SetupModelTests: XCTestCase {
         validateResult: Result<String, ConfigValidationError> = .success("uid-1"),
         commitError: Error? = nil,
         fetchOwnInviteCode: @escaping () -> String? = { nil },
+        fetchCurrentConfig: @escaping () -> SyncConfig? = { nil },
         signInResult: Result<String?, Error> = .success("a@b.c"),
         box: Box = Box(),
         autoSetup: AutoHostSetup? = nil
@@ -38,6 +39,7 @@ final class SetupModelTests: XCTestCase {
                     box.recorder.committed.append(config)
                 },
                 fetchOwnInviteCode: fetchOwnInviteCode,
+                fetchCurrentConfig: fetchCurrentConfig,
                 signInWithGoogle: {
                     switch signInResult {
                     case .success(let email): return email
@@ -359,11 +361,23 @@ extension SetupModelTests {
             rulesPath: { "/tmp/r" },
             commit: { config in box.recorder.committed.append(config); return .success(()) },
             newProjectID: { "vibecount-xyz" }))
-        let model = makeModel(route: .host, box: box, autoSetup: auto)
+        // First-time host: the committed config is what the store would hold
+        // afterward (projectID from the stub, no hostInviteCode). Wiring
+        // fetchCurrentConfig to it mirrors production, where the automatic
+        // commit updates AppDelegate's stored config, not the model.
+        let committedConfig = SyncConfig(
+            projectID: "vibecount-xyz", apiKey: "AIzaKey", hostInviteCode: nil)
+        let model = makeModel(
+            route: .host, fetchOwnInviteCode: { "ABCDEFGH23456789" },
+            fetchCurrentConfig: { committedConfig }, box: box, autoSetup: auto)
         model.hostMode = .automatic
         await model.startAutoHost()
         XCTAssertTrue(model.autoSetup?.finished ?? false)
         XCTAssertEqual(box.recorder.committed.first?.projectID, "vibecount-xyz")
+        // The success screen's share link must reflect the freshly committed
+        // config, not the nil currentConfig a first-time host starts with.
+        XCTAssertNotNil(model.shareLink)
+        XCTAssertTrue(model.shareLink?.contains("vibecount-xyz") ?? false)
     }
 
     // Minimal FirebaseCLIRunning stub so the real AutoHostSetup runs end to end.

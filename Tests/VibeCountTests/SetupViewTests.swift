@@ -10,6 +10,7 @@ final class SetupViewTests: XCTestCase {
                        validate: { _, _ in .success("uid") },
                        commit: { _, _ in },
                        fetchOwnInviteCode: { nil },
+                       fetchCurrentConfig: { nil },
                        signInWithGoogle: { nil },
                        dismiss: {},
                        makeAutoHostSetup: { Self.makeStubAutoHostSetup() }))
@@ -61,6 +62,7 @@ final class SetupViewTests: XCTestCase {
                 validate: { _, _ in .success("uid") },
                 commit: { _, _ in },
                 fetchOwnInviteCode: { nil },
+                fetchCurrentConfig: { nil },
                 signInWithGoogle: { nil },
                 dismiss: {},
                 makeAutoHostSetup: { Self.makeStubAutoHostSetup() }))

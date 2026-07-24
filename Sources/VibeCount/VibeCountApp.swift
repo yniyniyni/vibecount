@@ -405,6 +405,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                 fetchOwnInviteCode: { [weak self] in
                     try? self?.container?.mainContext.fetch(FetchDescriptor<User>()).first?.inviteCode
                 },
+                fetchCurrentConfig: { [weak self] in self?.syncConfigStore.load() },
                 signInWithGoogle: { [weak self] in
                     guard let self,
                           let stored = self.syncConfigStore.load() else {

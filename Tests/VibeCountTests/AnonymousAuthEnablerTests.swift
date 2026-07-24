@@ -8,7 +8,11 @@ final class AnonymousAuthEnablerTests: XCTestCase {
         return AnonymousAuthEnabler(session: URLSession(configuration: config))
     }
 
-    override func tearDown() { StubURLProtocol.handler = nil; super.tearDown() }
+    override func tearDown() {
+        StubURLProtocol.handler = nil
+        StubURLProtocol.failure = nil
+        super.tearDown()
+    }
 
     func testEnableSendsPatchWithBearerAndBody() async throws {
         let box = CapturedRequest()
@@ -37,6 +41,19 @@ final class AnonymousAuthEnablerTests: XCTestCase {
             XCTFail("expected throw")
         } catch let error as AnonymousAuthError {
             XCTAssertEqual(error, .http(403, "PERMISSION_DENIED"))
+        } catch { XCTFail("wrong error: \(error)") }
+    }
+
+    func testTransportFailureThrowsNetwork() async {
+        // A dropped connection (URLError) must surface as .network, not .http.
+        StubURLProtocol.failure = { _ in URLError(.notConnectedToInternet) }
+        do {
+            try await enabler().enable(projectID: "p", accessToken: "at")
+            XCTFail("expected throw")
+        } catch let error as AnonymousAuthError {
+            guard case .network = error else {
+                return XCTFail("expected .network, got \(error)")
+            }
         } catch { XCTFail("wrong error: \(error)") }
     }
 

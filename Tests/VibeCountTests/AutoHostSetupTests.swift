@@ -5,10 +5,15 @@ import XCTest
 final class AutoHostSetupTests: XCTestCase {
     private final class MockCLI: FirebaseCLIRunning, @unchecked Sendable {
         var failCreateFirestore = false
+        var failVersion = false
         var createdWebAppID = "1:2:web:3"
         var sdkConfigResult = FirebaseConfig(apiKey: "AIzaKey", projectID: "vibecount-new")
         var calls: [String] = []
-        func version() async throws -> String { calls.append("version"); return "13.0.0" }
+        func version() async throws -> String {
+            calls.append("version")
+            if failVersion { throw FirebaseCLIError.commandFailed(step: "version", message: "broken binary") }
+            return "13.0.0"
+        }
         func createProject(projectID: String, displayName: String) async throws { calls.append("createProject:\(projectID)") }
         func listProjects() async throws -> [FirebaseProjectSummary] { [] }
         func createFirestore(projectID: String, location: String) async throws {
@@ -61,6 +66,23 @@ final class AutoHostSetupTests: XCTestCase {
         XCTAssertTrue(setup.installNeeded)
         XCTAssertEqual(setup.states[.checkCLI], .failed("The firebase CLI isn't installed."))
         XCTAssertEqual(setup.states[.signIn], .pending)
+        XCTAssertFalse(setup.finished)
+    }
+
+    func testPresentButBrokenCLIFailsCheckWithoutInstallNeeded() async {
+        // locate() finds a binary, but `firebase --version` throws: preflight
+        // must fail the step (not flag installNeeded) and stop the chain.
+        let cli = MockCLI(); cli.failVersion = true
+        let box = Box()
+        let setup = makeSetup(cli: cli, box: box)
+        await setup.run()
+        XCTAssertFalse(setup.installNeeded)
+        guard case .failed(let message) = setup.states[.checkCLI] else {
+            return XCTFail("expected checkCLI failed, got \(String(describing: setup.states[.checkCLI]))")
+        }
+        XCTAssertTrue(message.contains("could not be run"))
+        XCTAssertEqual(setup.states[.signIn], .pending)
+        XCTAssertEqual(setup.states[.createProject], .pending)
         XCTAssertFalse(setup.finished)
     }
 
