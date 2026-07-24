@@ -21,6 +21,15 @@ enum LeaderboardTab: Hashable, CaseIterable {
         }
     }
 
+    /// The estimated spend this tab shows beneath the token count, or nil when
+    /// the friend hasn't pushed a cost (older client) — rendered as "—".
+    func cost(for friend: Friend) -> Double? {
+        switch self {
+        case .today: friend.latestDailyCost
+        case .last30Days: friend.latestMonthlyCost
+        }
+    }
+
     /// Rows ordered by this tab's figure, descending. Name breaks ties so the
     /// ordering is deterministic.
     func sorted(_ friends: [Friend]) -> [Friend] {
