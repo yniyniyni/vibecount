@@ -19,7 +19,8 @@ final class SetupModelTests: XCTestCase {
         commitError: Error? = nil,
         fetchOwnInviteCode: @escaping () -> String? = { nil },
         signInResult: Result<String?, Error> = .success("a@b.c"),
-        box: Box = Box()
+        box: Box = Box(),
+        autoSetup: AutoHostSetup? = nil
     ) -> SetupModel {
         SetupModel(
             route: route, currentConfig: currentConfig, ownInviteCode: ownInviteCode,
@@ -43,7 +44,14 @@ final class SetupModelTests: XCTestCase {
                     case .failure(let error): throw error
                     }
                 },
-                dismiss: {}))
+                dismiss: {},
+                makeAutoHostSetup: {
+                    autoSetup ?? AutoHostSetup(dependencies: AutoSetupDependencies(
+                        locateCLI: { nil }, makeCLI: { _, _ in fatalError() },
+                        signIn: { GoogleTokens(accessToken: "", refreshToken: "", expiresIn: 0) },
+                        accessToken: { _ in "" }, enableAnonymous: { _, _ in },
+                        rulesPath: { nil }, commit: { _ in .success(()) }, newProjectID: { "p" }))
+                }))
     }
 
     func testSubmitHostValidatesThenCommitsAndSucceeds() async {
@@ -335,5 +343,39 @@ final class SetupModelTests: XCTestCase {
         XCTAssertEqual(model.pendingJoinProjectID, "evil-project")
         model.joinText = "not a link"
         XCTAssertNil(model.pendingJoinProjectID)
+    }
+}
+
+extension SetupModelTests {
+    func testStartAutoHostRunsToCompletionAndReflectsConfig() async {
+        let box = Box()
+        // A stub AutoHostSetup that commits a config and finishes.
+        let auto = AutoHostSetup(dependencies: AutoSetupDependencies(
+            locateCLI: { "/bin/firebase" },
+            makeCLI: { _, _ in StubCLI() },
+            signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 1) },
+            accessToken: { _ in "at" },
+            enableAnonymous: { _, _ in },
+            rulesPath: { "/tmp/r" },
+            commit: { config in box.recorder.committed.append(config); return .success(()) },
+            newProjectID: { "vibecount-xyz" }))
+        let model = makeModel(route: .host, box: box, autoSetup: auto)
+        model.hostMode = .automatic
+        await model.startAutoHost()
+        XCTAssertTrue(model.autoSetup?.finished ?? false)
+        XCTAssertEqual(box.recorder.committed.first?.projectID, "vibecount-xyz")
+    }
+
+    // Minimal FirebaseCLIRunning stub so the real AutoHostSetup runs end to end.
+    private final class StubCLI: FirebaseCLIRunning, @unchecked Sendable {
+        func version() async throws -> String { "13" }
+        func createProject(projectID: String, displayName: String) async throws {}
+        func listProjects() async throws -> [FirebaseProjectSummary] { [] }
+        func createFirestore(projectID: String, location: String) async throws {}
+        func deployRules(projectID: String, rulesPath: String) async throws {}
+        func createWebApp(projectID: String, displayName: String) async throws -> String { "1:2:web:3" }
+        func sdkConfig(projectID: String, appID: String) async throws -> FirebaseConfig {
+            FirebaseConfig(apiKey: "AIzaKey", projectID: projectID)
+        }
     }
 }

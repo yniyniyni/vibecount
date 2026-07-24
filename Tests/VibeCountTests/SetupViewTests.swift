@@ -11,7 +11,16 @@ final class SetupViewTests: XCTestCase {
                        commit: { _, _ in },
                        fetchOwnInviteCode: { nil },
                        signInWithGoogle: { nil },
-                       dismiss: {}))
+                       dismiss: {},
+                       makeAutoHostSetup: { Self.makeStubAutoHostSetup() }))
+    }
+
+    private static func makeStubAutoHostSetup() -> AutoHostSetup {
+        AutoHostSetup(dependencies: AutoSetupDependencies(
+            locateCLI: { nil }, makeCLI: { _, _ in fatalError() },
+            signIn: { GoogleTokens(accessToken: "", refreshToken: "", expiresIn: 0) },
+            accessToken: { _ in "" }, enableAnonymous: { _, _ in },
+            rulesPath: { nil }, commit: { _ in .success(()) }, newProjectID: { "p" }))
     }
 
     func testConstructsForEveryRoute() {
@@ -53,7 +62,8 @@ final class SetupViewTests: XCTestCase {
                 commit: { _, _ in },
                 fetchOwnInviteCode: { nil },
                 signInWithGoogle: { nil },
-                dismiss: {}))
+                dismiss: {},
+                makeAutoHostSetup: { Self.makeStubAutoHostSetup() }))
         XCTAssertNotNil(SetupView(model: model).body)
     }
 }
