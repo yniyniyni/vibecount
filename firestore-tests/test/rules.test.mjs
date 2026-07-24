@@ -160,6 +160,26 @@ describe('users: owner writes', () => {
       }),
     );
   });
+
+  it('allows the optional cost fields when well-formed', async () => {
+    await assertSucceeds(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestDailyCost: 1.25,
+        latestMonthlyCost: 92.5,
+      }),
+    );
+  });
+
+  it('allows cost fields exactly at the cap', async () => {
+    await assertSucceeds(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestDailyCost: 100_000_000,
+        latestMonthlyCost: 100_000_000,
+      }),
+    );
+  });
 });
 
 describe('users: malformed owner writes are denied', () => {
@@ -230,6 +250,27 @@ describe('users: malformed owner writes are denied', () => {
         ...validUserDoc(),
         lastUpdated: '2026-07-10T00:00:00Z',
       }),
+    );
+  });
+
+  it('denies negative latestDailyCost', async () => {
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice'), { ...validUserDoc(), latestDailyCost: -0.01 }),
+    );
+  });
+
+  it('denies latestMonthlyCost above the 1e8 cap', async () => {
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice'), {
+        ...validUserDoc(),
+        latestMonthlyCost: 100_000_000.01,
+      }),
+    );
+  });
+
+  it('denies latestDailyCost of wrong type (string)', async () => {
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice'), { ...validUserDoc(), latestDailyCost: '1.25' }),
     );
   });
 });
