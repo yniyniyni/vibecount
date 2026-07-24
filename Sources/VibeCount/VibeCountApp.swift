@@ -306,6 +306,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
         pollUsage()
     }
 
+    /// Writes a scratch directory containing firebase.json + firestore.rules
+    /// (copied from the app bundle) and returns the directory path, which
+    /// `firebase deploy --config <path>/firebase.json` consumes. Returns nil if
+    /// the bundled rules can't be found.
+    static func writeScratchFirebaseConfig() -> String? {
+        guard let rulesURL = Bundle.main.url(forResource: "firestore", withExtension: "rules") else {
+            return nil
+        }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vibecount-deploy-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: rulesURL, to: dir.appendingPathComponent("firestore.rules"))
+            let firebaseJSON = #"{"firestore":{"rules":"firestore.rules"}}"#
+            try Data(firebaseJSON.utf8).write(to: dir.appendingPathComponent("firebase.json"))
+            return dir.appendingPathComponent("firebase.json").path
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Setup window
 
     @objc func openSyncSettings() {
@@ -422,19 +443,55 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
                     self?.setupWindow?.close()
                     self?.setupWindow = nil
                 },
-                // TODO(Task 8): replace with the real wiring (CLI locate/run,
-                // Google OAuth device flow, gcloud access tokens, bundled
-                // rules path, commitSyncConfig). This placeholder only keeps
-                // the app compiling — automatic host mode is not yet usable.
-                makeAutoHostSetup: {
+                makeAutoHostSetup: { [weak self] in
                     AutoHostSetup(dependencies: AutoSetupDependencies(
-                        locateCLI: { nil },
-                        makeCLI: { _, _ in fatalError("Task 8: real FirebaseCLI wiring") },
-                        signIn: { throw GoogleSignInError.notAvailable },
-                        accessToken: { _ in throw GoogleSignInError.notAvailable },
-                        enableAnonymous: { _, _ in throw GoogleSignInError.notAvailable },
-                        rulesPath: { nil },
-                        commit: { _ in .failure(.firestoreMissing) },
+                        locateCLI: { FirebaseCLI.locate() },
+                        makeCLI: { binary, refreshToken in
+                            FirebaseCLI(binaryPath: binary, token: refreshToken)
+                        },
+                        signIn: {
+                            try await GCloudAuth().signIn(
+                                clientID: DefaultSyncProject.googleClientID,
+                                clientSecret: DefaultSyncProject.googleClientSecret)
+                        },
+                        accessToken: { refreshToken in
+                            try await GoogleOAuth.refreshAccessToken(
+                                refreshToken: refreshToken,
+                                clientID: DefaultSyncProject.googleClientID,
+                                clientSecret: DefaultSyncProject.googleClientSecret,
+                                session: FirestoreClient.defaultSession())
+                        },
+                        enableAnonymous: { projectID, token in
+                            try await AnonymousAuthEnabler().enable(
+                                projectID: projectID, accessToken: token)
+                        },
+                        rulesPath: {
+                            // The deploy step needs a firebase.json whose
+                            // firestore.rules points at the bundled rules. Write
+                            // a scratch config dir and return its path.
+                            Self.writeScratchFirebaseConfig()
+                        },
+                        commit: { [weak self] config in
+                            guard let self else { return .failure(.network("app gone")) }
+                            let scratch = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                            defer { try? FileManager.default.removeItem(at: scratch) }
+                            let store = AuthSessionStore(directory: scratch)
+                            let result = await ConfigValidator().validate(FirebaseConfig(config), authStore: store)
+                            switch result {
+                            case .failure(let error): return .failure(error)
+                            case .success:
+                                guard let session = store.load() else {
+                                    return .failure(.network("no session after validation"))
+                                }
+                                do {
+                                    try await self.commitSyncConfig(config, session: session)
+                                    return .success(())
+                                } catch {
+                                    return .failure(.network(error.localizedDescription))
+                                }
+                            }
+                        },
                         newProjectID: { "vibecount-\(UUID().uuidString.prefix(8).lowercased())" }))
                 }))
         let hostingController = NSHostingController(rootView: SetupView(model: model))
