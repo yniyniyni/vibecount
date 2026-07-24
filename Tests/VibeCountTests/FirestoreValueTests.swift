@@ -32,6 +32,16 @@ final class FirestoreValueTests: XCTestCase {
         )
     }
 
+    func testDoubleRoundTripAndDecode() {
+        let value = FirestoreValue.double(18.4)
+        XCTAssertEqual(value.json["doubleValue"] as? Double, 18.4)
+        XCTAssertEqual(FirestoreValue(json: value.json), .double(18.4))
+        // Firestore may return a whole-valued double as a bare JSON number.
+        XCTAssertEqual(FirestoreValue(json: ["doubleValue": 12]), .double(12.0))
+        XCTAssertEqual(FirestoreValue(json: ["doubleValue": 12]).flatMap(\.doubleValue), 12.0)
+        XCTAssertNil(FirestoreValue.integer(5).doubleValue, "integer is not a double")
+    }
+
     func testUnknownValueDecodesToNil() {
         XCTAssertNil(FirestoreValue(json: ["booleanValue": true]))
         XCTAssertNil(FirestoreValue(json: [:]))
