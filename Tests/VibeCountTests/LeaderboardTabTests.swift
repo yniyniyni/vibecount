@@ -58,6 +58,19 @@ final class LeaderboardTabTests: XCTestCase {
         XCTAssertEqual(LeaderboardTab.last30Days.tokens(for: a), 900)
     }
 
+    func testEachTabExposesItsOwnCostFigure() {
+        let f = Friend(friendId: "a", displayName: "a", latestDailyTokens: 10, latestMonthlyTokens: 900,
+                       latestDailyCost: 1.5, latestMonthlyCost: 42.0, lastUpdated: Date())
+        XCTAssertEqual(LeaderboardTab.today.cost(for: f), 1.5)
+        XCTAssertEqual(LeaderboardTab.last30Days.cost(for: f), 42.0)
+    }
+
+    func testCostIsNilWhenFriendHasNone() {
+        let f = friend("a", daily: 10, monthly: 900)
+        XCTAssertNil(LeaderboardTab.today.cost(for: f))
+        XCTAssertNil(LeaderboardTab.last30Days.cost(for: f))
+    }
+
     func testTitles() {
         XCTAssertEqual(LeaderboardTab.today.title, "Today")
         XCTAssertEqual(LeaderboardTab.last30Days.title, "Last 30 Days",
