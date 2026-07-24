@@ -33,13 +33,15 @@ public final class LocalOnlySyncService: SyncService {
 
     public func stopSyncing() {}
 
-    public func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws {
+    public func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int, dailyCost: Double = 0, monthlyCost: Double = 0) async throws {
         let user = try ensureLocalUser()
         try FriendReconciler(context: context).upsert(
             id: user.userId,
             displayName: user.displayName,
             dailyTokens: dailyTokens,
-            monthlyTokens: monthlyTokens
+            monthlyTokens: monthlyTokens,
+            dailyCost: max(0, dailyCost),
+            monthlyCost: max(0, monthlyCost)
         )
     }
 

@@ -194,6 +194,8 @@ public final class FirestoreSyncService: SyncService {
             "displayName": .string(User.sanitizedDisplayName(user.displayName)),
             "latestDailyTokens": .integer(0),
             "latestMonthlyTokens": .integer(0),
+            "latestDailyCost": .double(0),
+            "latestMonthlyCost": .double(0),
             "lastUpdated": .timestamp(Date()),
         ])
     }
@@ -227,7 +229,9 @@ public final class FirestoreSyncService: SyncService {
                         id: id,
                         displayName: document.fields["displayName"]?.stringValue ?? "Unknown",
                         dailyTokens: document.fields["latestDailyTokens"]?.integerValue ?? 0,
-                        monthlyTokens: document.fields["latestMonthlyTokens"]?.integerValue ?? 0)
+                        monthlyTokens: document.fields["latestMonthlyTokens"]?.integerValue ?? 0,
+                        dailyCost: document.fields["latestDailyCost"]?.doubleValue,
+                        monthlyCost: document.fields["latestMonthlyCost"]?.doubleValue)
                 } else {
                     // The remote record was deleted; drop the local row.
                     try reconciler.remove(id: id)
@@ -247,7 +251,7 @@ public final class FirestoreSyncService: SyncService {
 
     // MARK: - SyncService
 
-    public func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws {
+    public func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int, dailyCost: Double = 0, monthlyCost: Double = 0) async throws {
         guard started, let uid = ownUid else {
             // Kick a (re)start for the next poll, but never block this one on
             // it — a hung start must not wedge the polling pipeline.
@@ -260,7 +264,8 @@ public final class FirestoreSyncService: SyncService {
         // Local row first so the UI reflects this poll even if the network
         // write below fails.
         try reconciler.upsert(id: uid, displayName: displayName,
-                              dailyTokens: dailyTokens, monthlyTokens: monthlyTokens)
+                              dailyTokens: dailyTokens, monthlyTokens: monthlyTokens,
+                              dailyCost: max(0, dailyCost), monthlyCost: max(0, monthlyCost))
 
         // The remote write is non-fatal: surface failures through status and
         // let the next poll retry. No offline queue by design.
@@ -269,6 +274,8 @@ public final class FirestoreSyncService: SyncService {
                 "displayName": .string(displayName),
                 "latestDailyTokens": .integer(max(0, dailyTokens)),
                 "latestMonthlyTokens": .integer(max(0, monthlyTokens)),
+                "latestDailyCost": .double(max(0, dailyCost)),
+                "latestMonthlyCost": .double(max(0, monthlyCost)),
                 "lastUpdated": .timestamp(Date()),
             ])
             status.lastError = nil
@@ -331,7 +338,9 @@ public final class FirestoreSyncService: SyncService {
             id: friendUid,
             displayName: friendDoc.fields["displayName"]?.stringValue ?? "Unknown",
             dailyTokens: friendDoc.fields["latestDailyTokens"]?.integerValue ?? 0,
-            monthlyTokens: friendDoc.fields["latestMonthlyTokens"]?.integerValue ?? 0)
+            monthlyTokens: friendDoc.fields["latestMonthlyTokens"]?.integerValue ?? 0,
+            dailyCost: friendDoc.fields["latestDailyCost"]?.doubleValue,
+            monthlyCost: friendDoc.fields["latestMonthlyCost"]?.doubleValue)
     }
 
     public func removeFriend(friendId: String) async throws {

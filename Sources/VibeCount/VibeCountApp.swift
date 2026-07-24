@@ -182,8 +182,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowD
             // Surface the full breakdown to the Stats tab.
             usageStats.breakdown = usage
 
+            // Estimated spend, computed from this Mac's own rate table, pushed
+            // alongside the token counts so friends see it on the leaderboard.
+            let table = rates.table
+            let dailyCost = usage.cost(on: Calendar.current.startOfDay(for: Date()), table: table)
+            let monthlyCost = usage.totalCost(table: table)
+
             do {
-                try await syncService?.pushLocalUsage(dailyTokens: usage.daily, monthlyTokens: usage.monthly)
+                try await syncService?.pushLocalUsage(dailyTokens: usage.daily, monthlyTokens: usage.monthly,
+                                                      dailyCost: dailyCost, monthlyCost: monthlyCost)
             } catch {
                 logger.error("Pushing usage failed: \(error, privacy: .public)")
                 syncService?.status.lastError = "Sync failed: \(error.localizedDescription)"

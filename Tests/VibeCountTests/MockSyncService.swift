@@ -13,7 +13,7 @@ final class MockSyncService: SyncService {
 
     private let context: ModelContext
     private(set) var started = false
-    private(set) var pushed: [(daily: Int, monthly: Int)] = []
+    private(set) var pushed: [(daily: Int, monthly: Int, dailyCost: Double, monthlyCost: Double)] = []
     private(set) var addedInviteCodes: [String] = []
     private(set) var removedFriendIds: [String] = []
 
@@ -29,13 +29,15 @@ final class MockSyncService: SyncService {
         started = false
     }
 
-    func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int) async throws {
-        pushed.append((dailyTokens, monthlyTokens))
+    func pushLocalUsage(dailyTokens: Int, monthlyTokens: Int, dailyCost: Double = 0, monthlyCost: Double = 0) async throws {
+        pushed.append((dailyTokens, monthlyTokens, dailyCost, monthlyCost))
         try Friend.upsert(
             friendId: "test-user",
             displayName: "Test User",
             dailyTokens: dailyTokens,
             monthlyTokens: monthlyTokens,
+            dailyCost: dailyCost,
+            monthlyCost: monthlyCost,
             in: context
         )
         try context.save()
