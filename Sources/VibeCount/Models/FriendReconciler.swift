@@ -9,12 +9,15 @@ struct FriendReconciler {
     let context: ModelContext
 
     /// Insert-or-update one leaderboard row and save.
-    func upsert(id: String, displayName: String, dailyTokens: Int, monthlyTokens: Int) throws {
+    func upsert(id: String, displayName: String, dailyTokens: Int, monthlyTokens: Int,
+               dailyCost: Double? = nil, monthlyCost: Double? = nil) throws {
         try Friend.upsert(
             friendId: id,
             displayName: displayName,
             dailyTokens: dailyTokens,
             monthlyTokens: monthlyTokens,
+            dailyCost: dailyCost,
+            monthlyCost: monthlyCost,
             in: context
         )
         try context.save()

@@ -45,6 +45,14 @@ final class FriendReconcilerTests: XCTestCase {
         XCTAssertEqual(rows.first?.latestMonthlyTokens, 70)
     }
 
+    func testUpsertStoresCost() throws {
+        try reconciler.upsert(id: "f1", displayName: "Ann", dailyTokens: 5, monthlyTokens: 50,
+                              dailyCost: 2.5, monthlyCost: 40.0)
+        let rows = try context.fetch(FetchDescriptor<Friend>())
+        XCTAssertEqual(rows.first?.latestDailyCost, 2.5)
+        XCTAssertEqual(rows.first?.latestMonthlyCost, 40.0)
+    }
+
     func testRemoveDeletesRow() throws {
         try reconciler.upsert(id: "f1", displayName: "Ann", dailyTokens: 5, monthlyTokens: 50)
 
