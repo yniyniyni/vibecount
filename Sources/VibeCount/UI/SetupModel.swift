@@ -11,6 +11,10 @@ struct SetupActions {
     /// Re-reads the local User's invite code after commit, because
     /// startSyncing can regenerate it (e.g. on first registration).
     var fetchOwnInviteCode: () -> String?
+    /// Re-reads the stored SyncConfig after an automatic commit, because that
+    /// path updates AppDelegate's stored config (not the model) — the model
+    /// needs it to build the success screen's share link.
+    var fetchCurrentConfig: () -> SyncConfig?
     /// Runs the browser OAuth flow and links (or recovers) the identity.
     /// Returns the linked Google email. Throws GoogleSignInError.cancelled
     /// for quiet abandons; other errors surface to the user.
@@ -159,6 +163,7 @@ final class SetupModel {
         autoSetup = setup
         await setup.run()
         if setup.finished {
+            currentConfig = actions.fetchCurrentConfig() ?? currentConfig
             ownInviteCode = actions.fetchOwnInviteCode() ?? ownInviteCode
             phase = .success
         }

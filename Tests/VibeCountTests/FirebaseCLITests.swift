@@ -126,6 +126,18 @@ extension FirebaseCLITests {
         try await runner.createProject(projectID: "p", displayName: "VibeCount")
     }
 
+    func testDeployRulesBuildsExpectedArgs() async throws {
+        let recorder = StubRunner.Recorder()
+        let runner = cli([CommandResult(exitCode: 0, stdout: "", stderr: "")], recorder)
+        try await runner.deployRules(projectID: "vibecount-abc", rulesPath: "/tmp/firebase.json")
+        let args = recorder.calls.first?.arguments ?? []
+        XCTAssertTrue(args.contains("deploy"))
+        XCTAssertTrue(args.contains("--only"))
+        XCTAssertTrue(args.contains("firestore:rules"))
+        XCTAssertEqual(args.firstIndex(of: "--project").map { args[$0 + 1] }, "vibecount-abc")
+        XCTAssertEqual(args.firstIndex(of: "--config").map { args[$0 + 1] }, "/tmp/firebase.json")
+    }
+
     func testCreateFirestorePassesLocationFlag() async throws {
         let recorder = StubRunner.Recorder()
         let runner = cli([CommandResult(exitCode: 0, stdout: "", stderr: "")], recorder)

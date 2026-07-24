@@ -65,6 +65,15 @@ final class AutoHostSetup {
                     throw StepError("The firebase CLI isn't installed.")
                 }
                 self.binaryPath = binary
+                // A present binary can still be broken; `firebase --version`
+                // needs no auth, so an empty token is fine for the probe.
+                do {
+                    _ = try await self.dependencies.makeCLI(binary, "").version()
+                } catch {
+                    let message = (error as? FirebaseCLIError).map(Self.describe)
+                        ?? error.localizedDescription
+                    throw StepError("The firebase CLI is installed but could not be run: \(message)")
+                }
             }
             try await step(.signIn) {
                 self.refreshToken = try await self.dependencies.signIn().refreshToken

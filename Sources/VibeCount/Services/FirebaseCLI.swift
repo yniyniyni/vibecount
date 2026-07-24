@@ -121,17 +121,15 @@ extension FirebaseCLI: FirebaseCLIRunning {
     }
 
     func createWebApp(projectID: String, displayName: String) async throws -> String {
-        do {
-            let stdout = try await execute(
-                step: "createWebApp",
-                ["apps:create", "WEB", displayName, "--project", projectID, "--json"])
-            struct Payload: Decodable { let result: Row }
-            struct Row: Decodable { let appId: String }
-            guard let appID = try? JSONDecoder().decode(Payload.self, from: Data(stdout.utf8)).result.appId else {
-                throw FirebaseCLIError.malformedOutput(stdout)
-            }
-            return appID
+        let stdout = try await execute(
+            step: "createWebApp",
+            ["apps:create", "WEB", displayName, "--project", projectID, "--json"])
+        struct Payload: Decodable { let result: Row }
+        struct Row: Decodable { let appId: String }
+        guard let appID = try? JSONDecoder().decode(Payload.self, from: Data(stdout.utf8)).result.appId else {
+            throw FirebaseCLIError.malformedOutput(stdout)
         }
+        return appID
     }
 
     func sdkConfig(projectID: String, appID: String) async throws -> FirebaseConfig {
