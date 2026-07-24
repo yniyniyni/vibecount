@@ -52,6 +52,7 @@ final class AutoHostSetup {
     private var refreshToken: String?
     private var projectID: String?
     private var config: FirebaseConfig?
+    private var binaryPath: String?
 
     init(dependencies: AutoSetupDependencies) { self.dependencies = dependencies }
 
@@ -59,16 +60,16 @@ final class AutoHostSetup {
         installNeeded = false
         do {
             try await step(.checkCLI) {
-                guard self.dependencies.locateCLI() != nil else {
+                guard let binary = self.dependencies.locateCLI() else {
                     self.installNeeded = true
                     throw StepError("The firebase CLI isn't installed.")
                 }
+                self.binaryPath = binary
             }
             try await step(.signIn) {
                 self.refreshToken = try await self.dependencies.signIn().refreshToken
             }
-            let binary = dependencies.locateCLI()!
-            let cli = dependencies.makeCLI(binary, refreshToken!)
+            let cli = dependencies.makeCLI(binaryPath!, refreshToken!)
             try await step(.createProject) {
                 if let existing = self.existingProjectID {
                     self.projectID = existing

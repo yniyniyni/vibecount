@@ -97,4 +97,29 @@ final class AutoHostSetupTests: XCTestCase {
         // createProject not repeated (already done); createFirestore retried.
         XCTAssertEqual(cli.calls.filter { $0.hasPrefix("createProject") }.count, 1)
     }
+
+    func testResumeDoesNotReDeriveBinaryPathAfterCLIVanishes() async {
+        let cli = MockCLI(); cli.failCreateFirestore = true
+        let box = Box()
+        final class LocateCounter: @unchecked Sendable { var count = 0 }
+        let counter = LocateCounter()
+        let setup = AutoHostSetup(dependencies: AutoSetupDependencies(
+            locateCLI: {
+                counter.count += 1
+                return counter.count == 1 ? "/bin/firebase" : nil
+            },
+            makeCLI: { _, _ in cli },
+            signIn: { GoogleTokens(accessToken: "at", refreshToken: "rt", expiresIn: 3600) },
+            accessToken: { _ in "at" },
+            enableAnonymous: { projectID, _ in box.enabledFor.append(projectID) },
+            rulesPath: { "/tmp/firestore.rules" },
+            commit: { config in box.committed.append(config); return .success(()) },
+            newProjectID: { "vibecount-new" }))
+        await setup.run()
+        XCTAssertEqual(setup.states[.createFirestore], .failed("nope"))
+        cli.failCreateFirestore = false
+        await setup.run()          // resume: CLI has "vanished" from PATH
+        XCTAssertTrue(setup.finished)
+        XCTAssertEqual(counter.count, 1)
+    }
 }
