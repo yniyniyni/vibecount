@@ -37,7 +37,7 @@ public struct CodexUsageMonitor: UsageMonitor {
             return UsageBreakdown(daily: 0, monthly: 0)
         }
 
-        var byDayModel: [Date: [String: Int]] = [:]
+        var byDayModel: [Date: [String: TokenBreakdown]] = [:]
 
         for url in collectRecentJSONLFiles(cutoff: startOf30Days) {
             try Task.checkCancellation()
@@ -50,8 +50,8 @@ public struct CodexUsageMonitor: UsageMonitor {
                 byDayModel: &byDayModel)
         }
 
-        let daily = (byDayModel[startOfToday]?.values.reduce(0, +)) ?? 0
-        let monthly = byDayModel.values.reduce(0) { $0 + $1.values.reduce(0, +) }
+        let daily = (byDayModel[startOfToday]?.values.reduce(0) { $0 + $1.total }) ?? 0
+        let monthly = byDayModel.values.reduce(0) { $0 + $1.values.reduce(0) { $0 + $1.total } }
         return UsageBreakdown(daily: daily, monthly: monthly, byDayModel: byDayModel)
     }
 
@@ -113,7 +113,7 @@ public struct CodexUsageMonitor: UsageMonitor {
         at url: URL,
         calendar: Calendar,
         startOf30Days: Date,
-        byDayModel: inout [Date: [String: Int]]
+        byDayModel: inout [Date: [String: TokenBreakdown]]
     ) throws {
         let reader: LineReader
         do {
@@ -169,14 +169,21 @@ public struct CodexUsageMonitor: UsageMonitor {
                       let payload = json["payload"] as? [String: Any],
                       let payloadType = payload["type"] as? String, payloadType == "token_count",
                       let info = payload["info"] as? [String: Any],
-                      let last = info["last_token_usage"] as? [String: Any],
-                      let lineTokens = last["total_tokens"] as? Int,
-                      lineTokens > 0
+                      let last = info["last_token_usage"] as? [String: Any]
                 else { return }
+
+                // Codex `input_tokens` includes cached; total = input + output.
+                // Split cached out so it can be priced at the cache-read rate.
+                let input = (last["input_tokens"] as? Int) ?? 0
+                let cached = (last["cached_input_tokens"] as? Int) ?? 0
+                let output = (last["output_tokens"] as? Int) ?? 0
+                let breakdown = TokenBreakdown(
+                    uncachedInput: max(0, input - cached), cachedInput: cached, cacheWrite: 0, output: output)
+                guard breakdown.total > 0 else { return }
 
                 let day = calendar.startOfDay(for: date)
                 let label = currentModel.map { ModelLabel.from($0) } ?? "Codex"
-                byDayModel[day, default: [:]][label, default: 0] += lineTokens
+                byDayModel[day, default: [:]][label, default: .zero].add(breakdown)
             }
         }
     }

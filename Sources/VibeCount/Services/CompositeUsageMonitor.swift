@@ -18,7 +18,7 @@ public struct CompositeUsageMonitor: UsageMonitor {
     public func fetchUsage() async throws -> UsageBreakdown {
         var daily = 0
         var monthly = 0
-        var byDayModel: [Date: [String: Int]] = [:]
+        var byDayModel: [Date: [String: TokenBreakdown]] = [:]
 
         for monitor in monitors {
             let usage: UsageBreakdown

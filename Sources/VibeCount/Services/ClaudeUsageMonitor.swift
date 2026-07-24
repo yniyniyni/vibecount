@@ -38,7 +38,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         // the per-day and per-model breakdowns; unkeyed rows (no id) can't be
         // deduped and accumulate directly.
         var keyed: [String: RowEntry] = [:]
-        var unkeyedByDayModel: [Date: [String: Int]] = [:]
+        var unkeyedByDayModel: [Date: [String: TokenBreakdown]] = [:]
 
         // Single pass. Monthly covers the trailing 30 days; today's rows are a
         // subset of it, so each line is classified once rather than walking the
@@ -63,12 +63,12 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         var daily = 0
         var monthly = 0
         for entry in keyed.values {
-            monthly += entry.tokens
-            byDayModel[entry.day, default: [:]][entry.model, default: 0] += entry.tokens
-            if entry.day == startOfToday { daily += entry.tokens }
+            monthly += entry.breakdown.total
+            byDayModel[entry.day, default: [:]][entry.model, default: .zero].add(entry.breakdown)
+            if entry.day == startOfToday { daily += entry.breakdown.total }
         }
         for (day, models) in unkeyedByDayModel {
-            let dayTotal = models.values.reduce(0, +)
+            let dayTotal = models.values.reduce(0) { $0 + $1.total }
             monthly += dayTotal
             if day == startOfToday { daily += dayTotal }
         }
@@ -76,12 +76,13 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         return UsageBreakdown(daily: daily, monthly: monthly, byDayModel: byDayModel)
     }
 
-    /// A deduplicated assistant row: its token total (max across duplicates),
-    /// the calendar day it belongs to, and its normalized model label.
+    /// A deduplicated assistant row: its token breakdown (the copy with the
+    /// larger total wins), the calendar day it belongs to, and its model label.
     private struct RowEntry {
-        var tokens: Int
+        var breakdown: TokenBreakdown
         let day: Date
         let model: String
+        var tokens: Int { breakdown.total }
     }
 
     /// Synchronous directory walk — `DirectoryEnumerator` iteration is marked
@@ -119,7 +120,7 @@ public struct ClaudeUsageMonitor: UsageMonitor {
         calendar: Calendar,
         startOf30Days: Date,
         keyed: inout [String: RowEntry],
-        unkeyedByDayModel: inout [Date: [String: Int]]
+        unkeyedByDayModel: inout [Date: [String: TokenBreakdown]]
     ) throws {
         let reader: LineReader
         do {
@@ -163,12 +164,28 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                       let usage = message["usage"] as? [String: Any] else { return }
 
                 let input = (usage["input_tokens"] as? Int) ?? 0
-                let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
                 let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
                 let output = (usage["output_tokens"] as? Int) ?? 0
 
-                let lineTokens = input + cacheCreate + cacheRead + output
-                if lineTokens == 0 { return }
+                // Cache writes are priced differently by duration: 5-minute is
+                // 1.25× input, 1-hour is 2× input. The `cache_creation` object
+                // carries the split; older logs only have the flat total, which
+                // we treat as 5-minute.
+                let cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+                var write5m = cacheCreate
+                var write1h = 0
+                if let cc = usage["cache_creation"] as? [String: Any] {
+                    let e5 = (cc["ephemeral_5m_input_tokens"] as? Int) ?? 0
+                    let e1 = (cc["ephemeral_1h_input_tokens"] as? Int) ?? 0
+                    if e5 + e1 > 0 { write5m = e5; write1h = e1 }
+                }
+
+                // Map onto the unified billable categories: cache_read →
+                // cachedInput, 5m/1h cache creation → cacheWrite / cacheWrite1h.
+                let breakdown = TokenBreakdown(
+                    uncachedInput: input, cachedInput: cacheRead,
+                    cacheWrite: write5m, cacheWrite1h: write1h, output: output)
+                if breakdown.total == 0 { return }
 
                 let day = calendar.startOfDay(for: date)
                 let model = ModelLabel.from(message["model"] as? String)
@@ -184,14 +201,14 @@ public struct ClaudeUsageMonitor: UsageMonitor {
                     // flicker between polls. day/model are identical across
                     // copies of a key.
                     if let existing = keyed[key] {
-                        if lineTokens > existing.tokens {
-                            keyed[key] = RowEntry(tokens: lineTokens, day: day, model: model)
+                        if breakdown.total > existing.breakdown.total {
+                            keyed[key] = RowEntry(breakdown: breakdown, day: day, model: model)
                         }
                     } else {
-                        keyed[key] = RowEntry(tokens: lineTokens, day: day, model: model)
+                        keyed[key] = RowEntry(breakdown: breakdown, day: day, model: model)
                     }
                 } else {
-                    unkeyedByDayModel[day, default: [:]][model, default: 0] += lineTokens
+                    unkeyedByDayModel[day, default: [:]][model, default: .zero].add(breakdown)
                 }
             }
         }

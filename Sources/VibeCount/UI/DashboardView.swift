@@ -107,6 +107,21 @@ public struct DashboardView: View {
                 .pointingHandCursor()
 
                 Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenPricing"), object: nil)
+                }) {
+                    HStack {
+                        Image(systemName: "dollarsign.circle")
+                        Text("Pricing…")
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .pointingHandCursor()
+
+                Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("AddFriend"), object: nil)
                 }) {
                     HStack {
