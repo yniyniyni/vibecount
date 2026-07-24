@@ -18,7 +18,7 @@ final class SetupViewTests: XCTestCase {
 
     private static func makeStubAutoHostSetup() -> AutoHostSetup {
         AutoHostSetup(dependencies: AutoSetupDependencies(
-            locateCLI: { nil }, makeCLI: { _, _ in fatalError() },
+            locateCLI: { nil }, makeCLI: { _ in fatalError() },
             signIn: { GoogleTokens(accessToken: "", refreshToken: "", expiresIn: 0) },
             accessToken: { _ in "" }, enableAnonymous: { _, _ in },
             rulesPath: { nil }, commit: { _ in .success(()) }, newProjectID: { "p" }))

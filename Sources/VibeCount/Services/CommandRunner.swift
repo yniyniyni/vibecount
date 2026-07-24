@@ -14,8 +14,8 @@ protocol CommandRunning: Sendable {
 }
 
 /// Real runner backed by Foundation.Process. Inherits the caller's environment
-/// and overlays the supplied keys (so PATH stays intact and FIREBASE_TOKEN is
-/// added on top).
+/// (so PATH and the user's HOME — hence the `firebase login` session — stay
+/// intact) and overlays any supplied keys on top.
 struct ProcessRunner: CommandRunning {
     /// Mutable scratch space for the two background reader work items below.
     /// Each item writes to exactly one field; `DispatchGroup.wait()` supplies

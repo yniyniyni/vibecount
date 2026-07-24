@@ -24,7 +24,7 @@ enum StepState: Equatable, Sendable { case pending, running, done, failed(String
 /// Side effects injected so the orchestrator stays unit-testable.
 struct AutoSetupDependencies {
     var locateCLI: () -> String?
-    var makeCLI: (_ binaryPath: String, _ refreshToken: String) -> FirebaseCLIRunning
+    var makeCLI: (_ binaryPath: String) -> FirebaseCLIRunning
     var signIn: () async throws -> GoogleTokens
     var accessToken: (_ refreshToken: String) async throws -> String
     var enableAnonymous: (_ projectID: String, _ accessToken: String) async throws -> Void
@@ -46,6 +46,9 @@ final class AutoHostSetup {
         Dictionary(uniqueKeysWithValues: AutoSetupStep.allCases.map { ($0, .pending) })
     private(set) var installNeeded = false
     private(set) var finished = false
+    /// The account `firebase login` is signed in as, surfaced once checkCLI
+    /// passes so the UI can nudge the user to sign the app in with the same one.
+    private(set) var cliUser: String?
 
     private let dependencies: AutoSetupDependencies
     // Carried between steps (and across a resume).
@@ -65,20 +68,30 @@ final class AutoHostSetup {
                     throw StepError("The firebase CLI isn't installed.")
                 }
                 self.binaryPath = binary
+                let probe = self.dependencies.makeCLI(binary)
                 // A present binary can still be broken; `firebase --version`
-                // needs no auth, so an empty token is fine for the probe.
+                // needs no auth.
                 do {
-                    _ = try await self.dependencies.makeCLI(binary, "").version()
+                    _ = try await probe.version()
                 } catch {
                     let message = (error as? FirebaseCLIError).map(Self.describe)
                         ?? error.localizedDescription
                     throw StepError("The firebase CLI is installed but could not be run: \(message)")
                 }
+                // The CLI uses its own `firebase login` session — verify one
+                // exists before creating anything, with an actionable message.
+                let user = try? await probe.currentUser()
+                guard let user, !user.isEmpty else {
+                    throw StepError(
+                        "The firebase CLI isn't signed in. Open Terminal, run "
+                        + "`firebase login`, then click Retry.")
+                }
+                self.cliUser = user
             }
             try await step(.signIn) {
                 self.refreshToken = try await self.dependencies.signIn().refreshToken
             }
-            let cli = dependencies.makeCLI(binaryPath!, refreshToken!)
+            let cli = dependencies.makeCLI(binaryPath!)
             try await step(.createProject) {
                 if let existing = self.existingProjectID {
                     self.projectID = existing
@@ -149,7 +162,13 @@ final class AutoHostSetup {
     }
     private static func describe(_ error: AnonymousAuthError) -> String {
         switch error {
-        case .http(_, let message): message
+        case .http(let status, let message):
+            // A 401/403 here almost always means the app's Google sign-in used a
+            // different account than `firebase login`, so it can't touch the
+            // project the CLI just created.
+            (status == 401 || status == 403)
+                ? "\(message) — sign in to VibeCount with the same Google account as your `firebase login`."
+                : message
         case .network(let message): message
         }
     }
